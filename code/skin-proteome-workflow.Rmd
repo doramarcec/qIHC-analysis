@@ -1,0 +1,206 @@
+---
+title: "skin-workflow"
+output: html_notebook
+---
+
+```{r}
+#Install packages
+install.packages(c("tidyverse", "openxlsx", "xml2", "stats", "utils", "gridExtra", "here", "car", "rstatix"))
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install(c("hpar", "HPAanalyse"))
+```
+
+```{r}
+# Load package libraries
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(stats)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+library(hpar)
+library(gridExtra)
+library(HPAanalyze)
+```
+
+```{r}
+# Data import
+ECM <- read.xlsx(here("data", "ECM_data.xlsx"))
+ECM
+
+# Data manipulation
+skinECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "skin" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+skinECM2 %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+skinECM$Age2 <- skinECM$Age
+
+skinECM <- skinECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+```
+
+# Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+skinECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Tesf of normality: Shapiro-Wilk
+skinECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+skinECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+skinECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution -> VERY positively skewed
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+skinECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+skinECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+skinECM %>%
+  dunn_test(Intensity~Age2) # sig difference between young and the remaining two groups, but no sig difference between adult and elderly
+
+skinECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and the remaining two groups, but no sig difference between young and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+skinWilcoxI <- skinECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+skinWilcoxQ <- skinECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+skinWilcoxQ$Tissue <- "skin"
+skinWilcoxI$Tissue <- "skin"
+skinWilcox <- full_join(skinWilcoxI, skinWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+skinCorrI <- skinECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05) 
+
+skinCorrQ <- skinECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05) 
+
+skinCorrI$Tissue <- "skin"
+skinCorrQ$Tissue <- "skin"
+skinCorr <- full_join(skinCorrI, skinCorrQ)
+
+# Plot of genes with significant correlation
+skinECM %>%
+  dplyr::filter(Gene_name %in% c("PDGFB", "PPA2", "IDH1", "UGDH", "DECR1", "ENG", "APOE", "APOA4")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+skinECM %>%
+  dplyr::filter(Gene_name %in% c("UGDH", "ITGA2B", "MMP9", "ENG", "PDHB", "IDH1", "VWF", "DECR1", "CD14", "ITGA2")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+skinECM2 %>%
+  dplyr::filter(Gene_name %in% c("UGDH", "ITGA2B", "MMP9", "ENG", "PDHB", "IDH1", "VWF", "DECR1", "CD14")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+skinECM %>%
+  dplyr::filter(Gene_name %in% c("PDGFB", "PPA2", "IDH1", "UGDH", "DECR1", "ENG", "APOE", "APOA4")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+```{r}
+# Genes of interest
+skinECM2 %>%
+  dplyr::filter(Gene_name %in% c("MMP9", "ENG")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+skinECM %>%
+  dplyr::filter(Gene_name %in% c("DECR1", "PDGFB", "IDH1", "APOA4", "ENG")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+```{r}
+# venn diagram to show how many antibodies are used for all 3, and unique for each age group! and repeat the test then to make it a fair test
+# plot x = age y = intensity boxplot for every gene
+# look for antibodies that are age-dependent
+skinECM %>% semi_join(., count(., Antibody_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Antibody_name, Age2) %>% count(Antibody_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Antibody_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+skinECM %>%
+  count(Age2, Antibody_name)
+
+skinECM %>% 
+  dplyr::filter(Antibody_name %in% c("Antibody HPA040726", "HPA045752", "HPA049368", "Antibody HPA001549", "HPA042638"), Gene_name == "LGALS7") %>%
+  count(Gene_name)
+  
+skinECM %>% semi_join(., count(., Antibody_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Antibody_name, Age2) %>% count(Antibody_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Antibody_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+skinECM %>%
+  dplyr::filter(Antibody_name %in% c("Antibody HPA040726", "Antibody HPA049813"))
+
+# Aging biomarkers dataset (44 tissue types)
+```
+
+

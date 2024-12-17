@@ -1,0 +1,334 @@
+---
+title: "Automated loops"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+library(purrr)
+```
+
+# Age classification in the entire dataset
+```{r}
+healthyECM <- ECM %>%
+  dplyr::filter(Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+
+# Sample classification by age 
+healthyECM$Age2 <- healthyECM$Age
+
+healthyECM <- healthyECM %>%
+  mutate(Age2 = case_when(
+    Age <= 40 ~ "≤ 40",
+    Age > 60 ~ "> 60"
+  ))
+
+healthyECM <- healthyECM %>%
+  drop_na(Age2)
+
+healthyECM %>%
+  count(Age2)
+
+## Sample classification by age: take a % from each age grouping and make it into a table
+ageData <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  count(Age2) %>%
+  mutate(Percentage = n / sum(n) * 100) %>%
+  select(Tissue_type_1, Age2, Percentage) %>%
+  pivot_wider(names_from = Age2, values_from = Percentage) # - esophagus, placenta, tonsil 
+
+healthyECM <- healthyECM %>%
+  dplyr::filter(!Tissue_type_1 == "placenta") %>%
+  dplyr::filter(!Tissue_type_1 == "esophagus") %>%
+  dplyr::filter(!Tissue_type_1 == "tonsil")
+
+healthyECM %>%
+  count(Tissue_type_1)
+```
+
+```{r}
+# This plot has to go into the dissertation/paper -> explains why the age was classified the way it was (thirds)
+healthyECM %>%
+  count(Age)
+
+healthyECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+healthyECM %>%
+  get_summary_stats(Age)
+```
+
+```{r}
+# Tesf of normality: density plots
+## Intensity distribution
+healthyECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+## Quantity distribution
+healthyECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution -> VERY positively skewed
+```
+
+# Automate the following functions for all datasets
+## Non-parametric testing: Kruskal-Wallis -> is there a significant difference between the samples?
+```{r}
+# Intensity
+doKruskalTest <- function(x) {
+  x %>%
+    kruskal_test(Intensity~Age2) %>%
+  print(kruskalTest)
+}
+
+a <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+a$data[[1]]
+
+a <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Kruskal = map(data, doKruskalTest))
+
+a$Kruskal[[1]]
+
+# Quantity
+doKruskalTest1 <- function(x) {
+  x %>%
+    kruskal_test(Quantity~Age2) %>%
+  print(kruskalTest1)
+}
+
+b <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+b$data[[1]]
+
+b <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Kruskal = map(data, doKruskalTest1))
+
+b$Kruskal[[1]]
+
+# Tidy the data frames
+a <- a %>%
+  unnest()
+
+b <- b %>%
+  unnest()
+
+kruskalResults <- full_join(a, b) %>%
+  select(Tissue_type_1, .y., n, statistic, df, p, method) %>%
+  unique() %>%
+  dplyr::filter(p < 0.05) %>%
+  group_by(Tissue_type_1) %>%
+  arrange(.by_group = TRUE)
+kruskalResults
+
+kruskalResults %>%
+  count(Tissue_type_1) # 37 tissues have sig difference
+
+healthyECM %>%
+  count(., Gene_name, Age2) %>% 
+  count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1) # all genes are present in both age groups in all tissues
+```
+
+## Post-hoc analysis: Dunn's test -> which samples significantly statistically differ?
+```{r}
+# Intensity
+doDunnsTest <- function(x) {
+    x %>%
+    dunn_test(Intensity~Age2) %>%
+  print(dunnsTest)
+  }
+
+c <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+c$data[[1]]
+
+c <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Dunn = map(data, doDunnsTest))
+
+c$Dunn[[1]]
+
+# Quantity
+doDunnsTest1 <- function(x) {
+    x %>%
+    dunn_test(Quantity~Age2) %>%
+  print(dunnsTest1)
+  }
+
+d <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+d$data[[1]]
+
+d <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Dunn = map(data, doDunnsTest1))
+
+d$Dunn[[1]]
+
+# Tidy the data frames
+c <- c %>%
+  unnest(Tissue_type_1, Dunn)
+
+d <- d %>%
+  unnest(Tissue_type_1, Dunn)
+
+dunnResults <- full_join(c, d) %>%
+  select(Tissue_type_1, .y., group1, group2, n1, n2, statistic, p, p.adj, p.adj.signif) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  group_by(Tissue_type_1) %>%
+  arrange(.by_group = TRUE)
+dunnResults
+```
+
+## Wilcoxon test: which genes are significantly DE across different age groupings?
+```{r}
+# Intensity
+doWilcoxTest <- function(x) {
+  x %>%
+    semi_join(., count(., Gene_name, Age2)) %>% 
+    semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+    group_by(Gene_name) %>%
+    wilcox_test(Intensity~Age2) %>%
+  print(WilcoxTest)
+  }
+
+e <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+e$data[[18]]
+
+e <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Wilcox = map(data, doWilcoxTest))
+
+e$Wilcox[[1]]
+
+# Quantity
+doWilcoxTest1 <- function(x) {
+  x %>%
+    semi_join(., count(., Gene_name, Age2)) %>% 
+    semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+    group_by(Gene_name) %>%
+    wilcox_test(Quantity~Age2) %>%
+  print(WilcoxTest1)
+  }
+
+f <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+f$data[[1]]
+
+f <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Wilcox = map(data, doWilcoxTest1))
+
+f$Wilcox[[1]]
+
+# Tidy the data frames
+e <- e %>%
+  unnest(Tissue_type_1, Wilcox)
+
+f <- f %>% 
+  unnest(Tissue_type_1, Wilcox)
+
+wilcoxResults <- full_join(e, f) %>%
+  select(Tissue_type_1, Gene_name, .y., group1, group2, n1, n2, statistic, p) %>%
+  dplyr::filter(p < 0.05)
+wilcoxResults
+```
+
+## Correlation test: is there a correlation between aging and the significantly DE genes?
+```{r}
+corData <- inner_join(wilcoxResults, healthyECM)
+corData$Unknown_code_2 <- NULL
+
+# Intensity
+doCorrTest <- function(x) {
+  x %>%
+    semi_join(., count(., Gene_name, Age)) %>% 
+    group_by(Gene_name) %>%
+    cor_test(Intensity, Age, method = "spearman") %>%
+    print(CorrTest)
+}
+
+g <- corData %>%
+  group_by(Tissue_type_1) %>%
+  dplyr::filter(Tissue_type_1 != "bone+marrow") %>%
+  nest()
+
+g$data[[3]]
+
+g <- corData %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Correlation = map(data, doCorrTest))
+
+#g$Correlation[[1]]
+
+# Quantity
+doCorrTest1 <- function(x) {
+  x %>%
+    semi_join(., count(., Gene_name, Age)) %>% 
+    group_by(Gene_name) %>%
+    cor_test(Quantity, Age, method = "spearman") %>%
+    print(CorrTest1)
+}
+
+h <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+h$data[[1]]
+
+h <- healthyECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Correlation = map(data, doCorrTest1))
+
+h$Correlation[[1]]
+
+# Tidy the data frames
+g <- g %>%
+  unnest(Tissue_type_1, Correlation)
+
+h <- h %>%
+  unnest(Tissue_type_1, Correlation)
+
+corrResults <- full_join(g, h) %>%
+  select(Tissue_type_1, Gene_name, var1, var2, cor, statistic, p, method) %>%
+  drop_na() %>%
+  dplyr::filter(p < 0.05)
+corrResults
+```
+
+
+
+
+
+
+
+

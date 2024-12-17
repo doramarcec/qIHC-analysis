@@ -1,0 +1,3295 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(stats)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+```
+
+# Identify sig DE and corr genes across all tissue types
+
+```{r}
+# Tissue types (n = 44)
+ECM %>%
+  count(Tissue_type_1)
+
+# Joining datasets with inferential stats
+alltissuesWilcox <- full_join(skinWilcox, adiposeWilcox)
+alltissuesCorr <- full_join(skinCorr, adiposeCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, adrenalWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, adrenalCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, appendixWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, appendixCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, basalGangliaWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, basalGangliaCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, boneMarrowWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, boneMarrowCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, breastWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, breastCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, bronchusWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, bronchusCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, cerebellumWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, cerebellumCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, cerebralCortexWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, cerebralCortexCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, cervixUterusWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, cervixUterusCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, colonWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, colonCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, duodenumWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, duodenumCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, endometriumWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, endometriumCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, epididymisWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, epididymisCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, esophagusWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, esophagusCorr)
+
+alltissuesCorr <- full_join(alltissuesCorr, gallbladderCorr) # no sig DE genes for gallbladder, so adding only correlated genes
+
+alltissuesWilcox <- full_join(alltissuesWilcox, heartMuscleWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, heartMuscleCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, hippocampalFormationWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, hippocampalFormationCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, kidneyWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, kidneyCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, liverWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, liverCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, lungWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, lungCorr)
+
+alltissuesWilcox <- full_join(alltissuesWilcox, lymphNodeWilcox)
+alltissuesCorr <- full_join(alltissuesCorr, lymphNodeCorr)
+
+alltissuesCorr <- full_join(alltissuesCorr, oralMucosaCorr) # no sig DE genes for oral mucosa, so adding only correlated genes
+```
+
+## Adipose tissue
+```{r}
+adiposeECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "adipose+tissue" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+adiposeECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+adiposeECM$Age2 <- adiposeECM$Age
+
+adiposeECM <- adiposeECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+adiposeECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+adiposeECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+adiposeECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+adiposeECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+adiposeECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+adiposeECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+adiposeECM %>%
+  dunn_test(Intensity~Age2) # sig difference between young and the remaining two groups, but no sig difference between adult and elderly
+
+adiposeECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and the remaining two groups, but no sig difference between young and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+adiposeWilcoxI <- adiposeECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+adiposeWilcoxQ <- adiposeECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+adiposeWilcoxI$Tissue <- "adipose tissue"
+adiposeWilcoxQ$Tissue <- "adipose tissue"
+adiposeWilcox <- full_join(adiposeWilcoxI, adiposeWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+adiposeCorrI <- adiposeECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+adiposeCorrQ <- adiposeECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+adiposeCorrI$Tissue <- "adipose tissue"
+adiposeCorrQ$Tissue <- "adipose tissue"
+adiposeCorr <- full_join(adiposeCorrI, adiposeCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Adrenal gland
+```{r}
+adrenalECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "adrenal+gland" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+adrenalECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+adrenalECM$Age2 <- adrenalECM$Age
+
+adrenalECM <- adrenalECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+adrenalECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+adrenalECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+adrenalECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+adrenalECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+adrenalECM %>%
+  kruskal_test(Intensity~Age2) # p > 0.05 -> there is no significant difference between samples
+
+adrenalECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+adrenalECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and the remaining two groups, but no sig difference between young and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+adrenalWilcox <- adiposeECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+adrenalWilcox$Tissue <- "adrenal gland"
+```
+
+```{r}
+# Correlation test between quantity and age for every gene
+adrenalCorr <- adrenalECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+adrenalCorr$Tissue <- "adrenal gland"
+
+# Plot of genes with significant correlation
+adrenalECM %>%
+  dplyr::filter(Gene_name %in% c("ETFB", "PPA2", "FGFR4")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+## Appendix
+```{r}
+appendixECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "appendix" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+appendixECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+appendixECM$Age2 <- appendixECM$Age
+
+appendixECM <- appendixECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+appendixECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+appendixECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+appendixECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+appendixECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+appendixECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+appendixECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+appendixECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and the other two groups, but not between young and adult groups
+
+appendixECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and young
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+appendixWilcoxI <- appendixECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+appendixWilcoxQ <- appendixECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+appendixWilcoxI$Tissue <- "appendix"
+appendixWilcoxQ$Tissue <- "appendix"
+appendixWilcox <- full_join(appendixWilcoxI, appendixWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+appendixCorrI <- appendixECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+appendixCorrQ <- appendixECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+appendixCorrI$Tissue <- "appendix"
+appendixCorrQ$Tissue <- "appendix"
+appendixCorr <- full_join(appendixCorrI, appendixCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Basal ganglia
+```{r}
+basalGangliaECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "basal+ganglia" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+basalGangliaECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+basalGangliaECM$Age2 <- basalGangliaECM$Age
+
+basalGangliaECM <- basalGangliaECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+basalGangliaECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+basalGangliaECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+basalGangliaECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+basalGangliaECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+basalGangliaECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+basalGangliaECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+basalGangliaECM %>%
+  dunn_test(Intensity~Age2) # sig difference between all 3 groups
+
+basalGangliaECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and the other 2 groups but not between young and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+basalGangliaWilcoxI <- basalGangliaECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+basalGangliaWilcoxQ <- basalGangliaECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+basalGangliaWilcoxI$Tissue <- "basal ganglia"
+basalGangliaWilcoxQ$Tissue <- "basal ganglia"
+basalGangliaWilcox <- full_join(basalGangliaWilcoxI, basalGangliaWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+basalGangliaCorrI <- basalGangliaECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+basalGangliaCorrQ <- basalGangliaECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+basalGangliaCorrI$Tissue <- "basal ganglia"
+basalGangliaCorrQ$Tissue <- "basal ganglia"
+basalGangliaCorr <- full_join(basalGangliaCorrI, basalGangliaCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Bone marrow
+```{r}
+boneMarrowECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "bone+marrow" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+boneMarrowECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+boneMarrowECM$Age2 <- boneMarrowECM$Age
+
+boneMarrowECM <- boneMarrowECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+boneMarrowECM <- boneMarrowECM %>%
+  drop_na(., Age)
+
+boneMarrowECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+boneMarrowECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+boneMarrowECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+boneMarrowECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+boneMarrowECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+boneMarrowECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+boneMarrowECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+boneMarrowECM %>%
+  dunn_test(Intensity~Age2) # sig difference between young and the other 2 groups but not between adult and elderly
+
+boneMarrowECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and the other 2 groups but not between young and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+boneMarrowWilcoxI <- boneMarrowECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+boneMarrowWilcoxQ <- boneMarrowECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+boneMarrowWilcoxI$Tissue <- "bone marrow"
+boneMarrowWilcoxQ$Tissue <- "bone marrow"
+boneMarrowWilcox <- full_join(boneMarrowWilcoxI, boneMarrowWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+boneMarrowCorrI <- boneMarrowECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+boneMarrowCorrQ <- boneMarrowECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+boneMarrowCorrI$Tissue <- "bone marrow"
+boneMarrowCorrQ$Tissue <- "bone marrow"
+boneMarrowCorr <- full_join(boneMarrowCorrI, boneMarrowCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+## Breast
+```{r}
+breastECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "breast" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+breastECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+breastECM$Age2 <- breastECM$Age
+
+breastECM <- breastECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+breastECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+breastECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+breastECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+breastECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+breastECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+breastECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+breastECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+breastECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and the other 2 groups but not between adult and young
+
+breastECM %>%
+  dunn_test(Quantity~Age2) # sig difference between elderly and the other 2 groups but not between adult and young
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+breastWilcoxI <- breastECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+breastWilcoxQ <- breastECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+breastWilcoxI$Tissue <- "breast"
+breastWilcoxQ$Tissue <- "breast"
+breastWilcox <- full_join(breastWilcoxI, breastWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+breastCorrI <- breastECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+breastCorrQ <- breastECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+breastCorrI$Tissue <- "breast"
+breastCorrQ$Tissue <- "breast"
+breastCorr <- full_join(breastCorrI, breastCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+## Bronchus
+```{r}
+bronchusECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "bronchus" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+bronchusECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+bronchusECM$Age2 <- bronchusECM$Age
+
+bronchusECM <- bronchusECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+bronchusECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+bronchusECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+bronchusECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+bronchusECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+bronchusECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+bronchusECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+bronchusECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+bronchusECM %>%
+  dunn_test(Intensity~Age2) # sig difference between young and the other 2 groups but not between adult and elderly
+
+bronchusECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 groups
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+bronchusWilcoxI <- bronchusECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+bronchusWilcoxQ <- bronchusECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+bronchusWilcoxI$Tissue <- "bronchus"
+bronchusWilcoxQ$Tissue <- "bronchus"
+bronchusWilcox <- full_join(bronchusWilcoxI, bronchusWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+bronchusCorrI <- bronchusECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+bronchusCorrQ <- bronchusECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+bronchusCorrI$Tissue <- "bronchus"
+bronchusCorrQ$Tissue <- "bronchus"
+bronchusCorr <- full_join(bronchusCorrI, bronchusCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+## Cerebellum
+```{r}
+cerebellumECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "cerebellum" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+cerebellumECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+cerebellumECM$Age2 <- cerebellumECM$Age
+
+cerebellumECM <- cerebellumECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+cerebellumECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+cerebellumECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+cerebellumECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+cerebellumECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+cerebellumECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+cerebellumECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+cerebellumECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+cerebellumECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and the other 2 groups but not between adult and young
+
+cerebellumECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 groups
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+cerebellumWilcoxI <- cerebellumECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+cerebellumWilcoxQ <- cerebellumECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+cerebellumWilcoxI$Tissue <- "cerebellum"
+cerebellumWilcoxQ$Tissue <- "cerebellum"
+cerebellumWilcox <- full_join(cerebellumWilcoxI, cerebellumWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+cerebellumCorrI <- cerebellumECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+cerebellumCorrQ <- cerebellumECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+cerebellumCorrI$Tissue <- "cerebellum"
+cerebellumCorrQ$Tissue <- "cerebellum"
+cerebellumCorr <- full_join(cerebellumCorrI, cerebellumCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Cerebral cortex
+```{r}
+cerebralCortexECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "cerebral+cortex" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+cerebralCortexECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+cerebralCortexECM$Age2 <- cerebralCortexECM$Age
+
+cerebralCortexECM <- cerebralCortexECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+cerebralCortexECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+cerebralCortexECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+cerebralCortexECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+cerebralCortexECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+cerebralCortexECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+cerebralCortexECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+cerebralCortexECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+cerebralCortexECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and adult
+
+cerebralCortexECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 groups
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+cerebralCortexWilcoxI <- cerebralCortexECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+cerebralCortexWilcoxQ <- cerebralCortexECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+cerebralCortexWilcoxI$Tissue <- "cerebral cortex"
+cerebralCortexWilcoxQ$Tissue <- "cerebral cortex"
+cerebralCortexWilcox <- full_join(cerebralCortexWilcoxI, cerebralCortexWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+cerebralCortexCorrI <- cerebralCortexECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+cerebralCortexCorrQ <- cerebralCortexECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+cerebralCortexCorrI$Tissue <- "cerebral cortex"
+cerebralCortexCorrQ$Tissue <- "cerebral cortex"
+cerebralCortexCorr <- full_join(cerebralCortexCorrI, cerebralCortexCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+## Cervix and uterus
+```{r}
+cervixUterusECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "cervix%2C+uterine" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+cervixUterusECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+cervixUterusECM$Age2 <- cervixUterusECM$Age
+
+cervixUterusECM <- cervixUterusECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+cervixUterusECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+cervixUterusECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+cervixUterusECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+cervixUterusECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+cervixUterusECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+cervixUterusECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+cervixUterusECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+cervixUterusECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and the other two groups but not between adult and young
+
+cervixUterusECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 groups
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+cervixUterusWilcoxI <- cervixUterusECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+cervixUterusWilcoxQ <- cervixUterusECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+cervixUterusWilcoxI$Tissue <- "cervix and uterus"
+cervixUterusWilcoxQ$Tissue <- "cervix and uterus"
+cervixUterusWilcox <- full_join(cervixUterusWilcoxI, cervixUterusWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+cervixUterusCorrI <- cervixUterusECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+cervixUterusCorrQ <- cervixUterusECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+cervixUterusCorrI$Tissue <- "cervix and uterus"
+cervixUterusCorrQ$Tissue <- "cervix and uterus"
+cervixUterusCorr <- full_join(cervixUterusCorrI, cervixUterusCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Colon
+```{r}
+colonECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "colon" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+colonECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+colonECM$Age2 <- colonECM$Age
+
+colonECM <- colonECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+colonECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+colonECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+colonECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+colonECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+colonECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+colonECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+colonECM %>%
+  kruskal_test(Quantity~Age2) # p > 0.05 -> there is no significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+colonECM %>%
+  dunn_test(Intensity~Age2) # sig difference between young and the other two groups but not between adult and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+colonWilcox <- colonECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+colonWilcox$Tissue <- "colon"
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+colonCorr <- colonECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+colonCorr$Tissue <- "colon"
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Duodenum
+```{r}
+duodenumECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "duodenum" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+duodenumECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+duodenumECM$Age2 <- duodenumECM$Age
+
+duodenumECM <- duodenumECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+duodenumECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+duodenumECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+duodenumECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+duodenumECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+duodenumECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+duodenumECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+duodenumECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+duodenumECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and adult
+
+duodenumECM %>%
+  dunn_test(Quantity~Age2) # sig difference between elderly and adult
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+duodenumWilcoxI <- duodenumECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p < 0.05) %>%
+  arrange(p)
+
+duodenumWilcoxQ <- duodenumECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p < 0.05) %>%
+  arrange(p)
+
+duodenumWilcoxI$Tissue <- "duodenum"
+duodenumWilcoxQ$Tissue <- "duodenum"
+duodenumWilcox <- full_join(duodenumWilcoxI, duodenumWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+duodenumCorrI <- duodenumECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+duodenumCorrQ <- duodenumECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+duodenumCorrI$Tissue <- "duodenum"
+duodenumCorrQ$Tissue <- "duodenum"
+duodenumCorr <- full_join(duodenumCorrI, duodenumCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Endometrium
+```{r}
+endometriumECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "endometrium" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+endometriumECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+endometriumECM$Age2 <- endometriumECM$Age
+
+endometriumECM <- endometriumECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+endometriumECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+endometriumECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # cannot do Shapiro-Wilk because the sample size is > 5000
+
+endometriumECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # cannot do Shapiro-Wilk because the sample size is > 5000
+
+# Density plot: intensity distribution
+endometriumECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+endometriumECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+endometriumECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+endometriumECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+endometriumECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and the other 2 groups but not between adult and young
+
+endometriumECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 groups
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+endometriumWilcoxI <- endometriumECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+endometriumWilcoxQ <- endometriumECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+endometriumWilcoxI$Tissue <- "endometrium"
+endometriumWilcoxQ$Tissue <- "endometrium"
+endometriumWilcox <- full_join(endometriumWilcoxI, endometriumWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+endometriumCorrI <- endometriumECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+endometriumCorrQ <- endometriumECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+endometriumCorrI$Tissue <- "endometrium"
+endometriumCorrQ$Tissue <- "endometrium"
+endometriumCorr <- full_join(endometriumCorrI, endometriumCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+## Epididymis
+```{r}
+epididymisECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "epididymis" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+epididymisECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+epididymisECM$Age2 <- epididymisECM$Age
+
+epididymisECM <- epididymisECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+epididymisECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+epididymisECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+epididymisECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+epididymisECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+epididymisECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+epididymisECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+epididymisECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+epididymisECM %>%
+  dunn_test(Intensity~Age2) # sig difference between adult and the remaining two, no sig difference between elderly and young
+
+epididymisECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 groups
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+epididymisWilcoxI <- epididymisECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+epididymisWilcoxQ <- epididymisECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+epididymisWilcoxI$Tissue <- "epididymis"
+epididymisWilcoxQ$Tissue <- "epididymis"
+epididymisWilcox <- full_join(epididymisWilcoxI, epididymisWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+epididymisCorrI <- epididymisECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+epididymisCorrQ <- epididymisECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+epididymisCorrI$Tissue <- "epididymis"
+epididymisCorrQ$Tissue <- "epididymis"
+epididymisCorr <- full_join(epididymisCorrI, epididymisCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+## Esophagus
+```{r}
+esophagusECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "esophagus" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+esophagusECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+esophagusECM$Age2 <- esophagusECM$Age
+
+esophagusECM <- esophagusECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+esophagusECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+esophagusECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+esophagusECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Density plot: intensity distribution
+esophagusECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+esophagusECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+esophagusECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+esophagusECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+esophagusECM %>%
+  dunn_test(Intensity~Age2) # sig difference between adult and elderly
+esophagusECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+esophagusWilcoxI <- esophagusECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p < 0.05) %>%
+  arrange(p)
+
+esophagusWilcoxQ <- esophagusECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p < 0.05) %>%
+  arrange(p)
+
+esophagusWilcoxI$Tissue <- "esophagus"
+esophagusWilcoxQ$Tissue <- "esophagus"
+esophagusWilcox <- full_join(esophagusWilcoxI, esophagusWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+esophagusCorrI <- esophagusECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+esophagusCorrQ <- esophagusECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+esophagusCorrI$Tissue <- "esophagus"
+esophagusCorrQ$Tissue <- "esophagus"
+esophagusCorr <- full_join(esophagusCorrI, esophagusCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+## Fallopian tube
+```{r}
+fallopianTubeECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "fallopian+tube" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+fallopianTubeECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+fallopianTubeECM$Age2 <- fallopianTubeECM$Age
+
+fallopianTubeECM <- fallopianTubeECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+fallopianTubeECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+fallopianTubeECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+fallopianTubeECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+fallopianTubeECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+fallopianTubeECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+fallopianTubeECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+fallopianTubeECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+fallopianTubeECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and the other 2 groups but not between adult and young
+
+fallopianTubeECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and the other 2 groups but not between elderly and young
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+fallopianTubeWilcoxI <- fallopianTubeECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+fallopianTubeWilcoxQ <- fallopianTubeECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+fallopianTubeWilcoxI$Tissue <- "fallopian tube"
+fallopianTubeWilcoxQ$Tissue <- "fallopian tube"
+fallopianTubeWilcox <- full_join(fallopianTubeWilcoxI, fallopianTubeWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+fallopianTubeCorrI <- fallopianTubeECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+fallopianTubeCorrQ <- fallopianTubeECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+fallopianTubeCorrI$Tissue <- "fallopian tube"
+fallopianTubeCorrQ$Tissue <- "fallopian tube"
+fallopianTubeCorr <- full_join(fallopianTubeCorrI, fallopianTubeCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+## Gallbladder
+```{r}
+gallbladderECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "gallbladder" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+gallbladderECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+gallbladderECM$Age2 <- gallbladderECM$Age
+
+gallbladderECM <- gallbladderECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+gallbladderECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+gallbladderECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+gallbladderECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+gallbladderECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+gallbladderECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+gallbladderECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+gallbladderECM %>%
+  kruskal_test(Quantity~Age2) # p > 0.05 -> there is no significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+gallbladderECM %>%
+  dunn_test(Intensity~Age2) # sig difference between adult and the other 2 groups but not between elderly and young
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+gallbladderWilcox <- gallbladderECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p) # 0 significantly DE
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+gallbladderCorr <- gallbladderECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+gallbladderCorr$Tissue <- "gallbladder"
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Heart muscle
+```{r}
+heartMuscleECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "heart+muscle" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+heartMuscleECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+heartMuscleECM$Age2 <- heartMuscleECM$Age
+
+heartMuscleECM <- heartMuscleECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+heartMuscleECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+heartMuscleECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+heartMuscleECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+heartMuscleECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+heartMuscleECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+heartMuscleECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+heartMuscleECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+heartMuscleECM %>%
+  dunn_test(Intensity~Age2) # sig difference between all 3 groups
+
+heartMuscleECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 groups
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+heartMuscleWilcoxI <- heartMuscleECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+heartMuscleWilcoxQ <- heartMuscleECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+heartMuscleWilcoxI$Tissue <- "heart muscle"
+heartMuscleWilcoxQ$Tissue <- "heart muscle"
+heartMuscleWilcox <- full_join(heartMuscleWilcoxI, heartMuscleWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+heartMuscleCorrI <- heartMuscleECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+heartMuscleCorrQ <- heartMuscleECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+heartMuscleCorrI$Tissue <- "heart muscle"
+heartMuscleCorrQ$Tissue <- "heart muscle"
+heartMuscleCorr <- full_join(heartMuscleCorrI, heartMuscleCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+## Hippocampal formation
+```{r}
+hippocampalFormationECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "hippocampal+formation" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+hippocampalFormationECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+hippocampalFormationECM$Age2 <- hippocampalFormationECM$Age
+
+hippocampalFormationECM <- hippocampalFormationECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+hippocampalFormationECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+hippocampalFormationECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+hippocampalFormationECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+hippocampalFormationECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+hippocampalFormationECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+hippocampalFormationECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+hippocampalFormationECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+hippocampalFormationECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and other two groups but not between adult and young
+
+hippocampalFormationECM %>%
+  dunn_test(Quantity~Age2) # sig difference between young and other two groups but not between adult and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+hippocampalFormationWilcoxI <- hippocampalFormationECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+hippocampalFormationWilcoxQ <- hippocampalFormationECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+hippocampalFormationWilcoxI$Tissue <- "hippocampal formation"
+hippocampalFormationWilcoxQ$Tissue <- "hippocampal formation"
+hippocampalFormationWilcox <- full_join(hippocampalFormationWilcoxI, hippocampalFormationWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+hippocampalFormationCorrI <- hippocampalFormationECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+hippocampalFormationCorrQ <- hippocampalFormationECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+hippocampalFormationCorrI$Tissue <- "hippocampal formation"
+hippocampalFormationCorrQ$Tissue <- "hippocampal formation"
+hippocampalFormationCorr <- full_join(hippocampalFormationCorrI, hippocampalFormationCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+
+
+
+
+
+## Kidney 
+```{r}
+kidneyECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "kidney" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+kidneyECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+kidneyECM$Age2 <- kidneyECM$Age
+
+kidneyECM <- kidneyECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+kidneyECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+kidneyECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+kidneyECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+kidneyECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+kidneyECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+kidneyECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+kidneyECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+kidneyECM %>%
+  dunn_test(Intensity~Age2) # sig difference between elderly and adult
+
+kidneyECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 samples
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+kidneyWilcoxI <- kidneyECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+kidneyWilcoxQ <- kidneyECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+kidneyWilcoxI$Tissue <- "kidney"
+kidneyWilcoxQ$Tissue <- "kidney"
+kidneyWilcox <- full_join(kidneyWilcoxI, kidneyWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+kidneyCorrI <- kidneyECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+kidneyCorrQ <- kidneyECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+kidneyCorrI$Tissue <- "kidney"
+kidneyCorrQ$Tissue <- "kidney"
+kidneyCorr <- full_join(kidneyCorrI, kidneyCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+## Liver
+```{r}
+liverECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "liver" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+liverECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+liverECM$Age2 <- liverECM$Age
+
+liverECM <- liverECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+liverECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+liverECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+liverECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+liverECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+liverECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+liverECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+liverECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+liverECM %>%
+  dunn_test(Intensity~Age2) # sig difference between young and the remaining two groups but not between adult and elderly
+
+liverECM %>%
+  dunn_test(Quantity~Age2) # sig difference between elderly and the other two groups but not between adult and young
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+liverWilcoxI <- liverECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+liverWilcoxQ <- liverECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+liverWilcoxI$Tissue <- "liver"
+liverWilcoxQ$Tissue <- "liver"
+liverWilcox <- full_join(liverWilcoxI, liverWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+liverCorrI <- liverECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+liverCorrQ <- kidneyECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+liverCorrI$Tissue <- "liver"
+liverCorrQ$Tissue <- "liver"
+liverCorr <- full_join(liverCorrI, liverCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+
+## Lung
+
+```{r}
+lungECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "lung" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+lungECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+lungECM$Age2 <- lungECM$Age
+
+lungECM <- lungECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+lungECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+lungECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+lungECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+lungECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+lungECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+lungECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+lungECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+lungECM %>%
+  dunn_test(Intensity~Age2) # sig difference between young and the remaining two groups but not between adult and elderly
+
+lungECM %>%
+  dunn_test(Quantity~Age2) # sig difference between elderly and the other two groups but not between adult and young
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+lungWilcoxI <- lungECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+lungWilcoxQ <- lungECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+lungWilcoxI$Tissue <- "lung"
+lungWilcoxQ$Tissue <- "lung"
+lungWilcox <- full_join(lungWilcoxI, lungWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+lungCorrI <- lungECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+lungCorrQ <- lungECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+lungCorrI$Tissue <- "lung"
+lungCorrQ$Tissue <- "lung"
+lungCorr <- full_join(lungCorrI, lungCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+## Lymph node
+
+```{r}
+lymphNodeECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "lymph+node" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+lymphNodeECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+lymphNodeECM$Age2 <- lymphNodeECM$Age
+
+lymphNodeECM <- lymphNodeECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+lymphNodeECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+lymphNodeECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+lymphNodeECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+lymphNodeECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+lymphNodeECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+lymphNodeECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+lymphNodeECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+lymphNodeECM %>%
+  dunn_test(Intensity~Age2) # sig difference between all 3 samples
+
+lymphNodeECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 samples
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+lymphNodeWilcoxI <- lymphNodeECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+lymphNodeWilcoxQ <- lymphNodeECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+lymphNodeWilcoxI$Tissue <- "lymph node"
+lymphNodeWilcoxQ$Tissue <- "lymph node"
+lymphNodeWilcox <- full_join(lymphNodeWilcoxI, lymphNodeWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+lymphNodeCorrI <- lymphNodeECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+lymphNodeCorrQ <- lymphNodeECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+lymphNodeCorrI$Tissue <- "lung"
+lymphNodeCorrQ$Tissue <- "lung"
+lymphNodeCorr <- full_join(lymphNodeCorrI, lymphNodeCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+## Oral mucosa
+
+```{r}
+oralMucosaECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "oral+mucosa" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+oralMucosaECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+oralMucosaECM$Age2 <- oralMucosaECM$Age
+
+oralMucosaECM <- oralMucosaECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+oralMucosaECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+oralMucosaECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+oralMucosaECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+oralMucosaECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+oralMucosaECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+oralMucosaECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+oralMucosaECM %>%
+  kruskal_test(Quantity~Age2) # p > 0.05 -> there is no significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+oralMucosaECM %>%
+  dunn_test(Intensity~Age2) # sig difference between all 3 samples
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+oralMucosaWilcox <- oralMucosaECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+oralMucosaWilcox$Tissue <- "oral mucosa"
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+oralMucosaCorr <- oralMucosaECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+oralMucosaCorr$Tissue <- "oral mucosa"
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+
+
+## Ovary
+
+```{r}
+ovaryECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "ovary" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+#Age distribution plot
+ovaryECM %>%
+  ggplot() + aes(x = Age) + geom_density()
+
+# Sample classification by age
+ovaryECM$Age2 <- ovaryECM$Age
+
+ovaryECM <- ovaryECM %>%
+  mutate(Age2 = case_when(
+    Age <= 30 ~ "young",
+    Age > 30 & Age <= 60 ~ "adult",
+    Age > 60 ~ "elderly"
+  ))
+
+ovaryECM %>%
+  count(Age2)
+```
+
+### Inferential statistics: does the protein expression across the 3 age categories (young, adult, elderly) statistically differ?
+
+```{r}
+# Tesf of normality: Shapiro-Wilk
+ovaryECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity) # p < 0.05 -> not a normal dist
+
+ovaryECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity) # p < 0.05 -> not a normal dist
+
+# Density plot: intensity distribution
+ovaryECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() # not a normal distribution -> positively skewed
+
+# Density plot: quantity distribution
+ovaryECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density() # not a normal distribution 
+```
+
+```{r}
+# Non-parametric testing: Kruskal-Wallis 
+ovaryECM %>%
+  kruskal_test(Intensity~Age2) # p < 0.05 -> there is a significant difference between samples
+
+ovaryECM %>%
+  kruskal_test(Quantity~Age2) # p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# Post-hoc analysis: Dunn's test
+ovaryECM %>%
+  dunn_test(Intensity~Age2) # no sig difference
+
+ovaryECM %>%
+  dunn_test(Quantity~Age2) # sig difference between all 3 samples
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+ovaryWilcoxI <- ovaryECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Intensity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+ovaryWilcoxQ <- ovaryECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+
+ovaryWilcoxI$Tissue <- "ovary"
+ovaryWilcoxQ$Tissue <- "ovary"
+ovaryWilcox <- full_join(ovaryWilcoxI, ovaryWilcoxQ)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+ovaryCorrI <- ovaryECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Intensity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+ovaryCorrQ <- ovaryECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age, method = "spearman") %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05)
+
+ovaryCorrI$Tissue <- "ovary"
+ovaryCorrQ$Tissue <- "ovary"
+ovaryCorr <- full_join(ovaryCorrI, ovaryCorrQ)
+
+# Plot of genes with significant correlation
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+level_order <- c('young', 'adult', 'elderly')
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+adiposeECM %>%
+  dplyr::filter(Gene_name %in% c("")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+

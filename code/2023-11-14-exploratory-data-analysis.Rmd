@@ -1,0 +1,163 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(stats)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+library(hpar)
+library(gridExtra)
+library(HPAanalyze)
+```
+
+# Quantity
+
+```{r}
+# Post-hoc analysis: Dunn's test
+skinECM %>%
+  dunn_test(Quantity~Age2) # sig difference between adult and the remaining two groups, but no sig difference between young and elderly
+```
+
+```{r}
+# Wilcoxon test to identify genes with significantly different expression across different age groups
+skinECM %>% semi_join(., count(., Gene_name, Age2) %>% dplyr::filter(n > 2)) %>% 
+  semi_join(., count(., Gene_name, Age2) %>% count(Gene_name) %>% dplyr::filter(n > 1)) %>%
+  group_by(Gene_name) %>%
+  wilcox_test(Quantity~Age2) %>%
+  dplyr::filter(p.adj < 0.05) %>%
+  arrange(p)
+```
+
+```{r}
+# Correlation test between intensity and age for every gene
+skinECM %>% 
+  semi_join(., count(., Gene_name, Age) %>% dplyr::filter(n > 2)) %>% 
+  group_by(Gene_name) %>%
+  cor_test(Quantity, Age) %>%
+  arrange(desc(abs(cor))) %>%
+  dplyr::filter(p < 0.05) 
+
+# Plot of genes with significant correlation
+skinECM %>%
+  dplyr::filter(Gene_name %in% c("PDGFB", "PPA2", "IDH1", "UGDH", "DECR1", "ENG", "APOE", "APOA4")) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+```{r}
+# Boxplot of expression of sig cor genes across age groups
+skinECM %>%
+  dplyr::filter(Gene_name %in% c("PDGFB", "PPA2", "IDH1", "UGDH", "DECR1", "ENG", "APOE", "APOA4")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+```{r}
+# Genes of interest: DECR1, PDGFB, IDH1, APOA4, ENG
+
+level_order <- c('young', 'adult', 'elderly')
+
+skinECM %>%
+  dplyr::filter(Gene_name %in% c("DECR1", "PDGFB", "IDH1", "APOA4", "ENG")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+```
+
+# Genes of interest
+
+```{r}
+Histology <- subsetData$normal_tissue
+Pathology <- subsetData$pathology
+cellLocal <- subsetData$subcellular_location
+
+Histology %>%
+  dplyr::filter(gene %in% c("MMP9", "DECR1", "PDGFB", "IDH1", "APOA4", "ENG"))
+
+Pathology %>%
+  dplyr::filter(gene %in% c("MMP9", "DECR1", "PDGFB", "IDH1", "APOA4", "ENG"))
+
+cellLocal %>%
+  dplyr::filter(gene %in% c("MMP9", "DECR1", "PDGFB", "IDH1", "APOA4", "ENG"))
+```
+
+*ENG gene* -> encodes endoglin protein (https://www.proteinatlas.org/ENSG00000106991-ENG/tissue/skin)
+- the only gene that is sig DE and sig corr for both parameters and ageing
+```{r}
+skinHistology %>%
+  dplyr::filter(gene == "ENG")
+
+hpaVis(data = subsetData,
+       targetGene = 'ENSG00000106991',
+       targetTissue = c('skin', 'skin 1', 'skin 2'),
+       targetCellType = "cells in basal layer",
+       visType = c("Tissue", "Subcell"))
+```
+
+*MMP9 gene* -> encodes matrix metallopeptidase 9 (https://www.proteinatlas.org/ENSG00000100985-MMP9/tissue/skin)
+- sig DE and corr for intensity parameter and ageing -> low exp in Langerhans, melanocytes and keratinocytes
+```{r}
+skinHistology %>%
+  dplyr::filter(gene == "MMP9")
+
+hpaVis(data = subsetData,
+       targetGene = 'ENSG00000100985',
+       targetTissue = c('skin', 'skin 1', 'skin 2'),
+       targetCellType = "cells in basal layer",
+       visType = c("Tissue", "Subcell"))
+```
+
+*IDH1 gene* (https://www.proteinatlas.org/ENSG00000138413-IDH1/tissue/skin)
+- sig DE and corr for quantity parameter -> high exp in sebaceous glands, low in melanocytes, keratinocytes and epidermal cells
+```{r}
+skinHistology %>%
+  dplyr::filter(gene == "IDH1")
+
+hpaVis(data = subsetData,
+       targetGene = 'ENSG00000138413',
+       targetTissue = c('skin', 'skin 1', 'skin 2'),
+       targetCellType = "cells in basal layer",
+       visType = c("Tissue", "Subcell"))
+```
+
+*DECR1 gene* (https://www.proteinatlas.org/ENSG00000104325-DECR1/tissue/skin)
+```{r}
+skinHistology %>%
+  dplyr::filter(gene == "DECR1")
+
+hpaVis(data = subsetData,
+       targetGene = 'ENSG00000104325',
+       targetTissue = c('skin', 'skin 1', 'skin 2'),
+       targetCellType = "cells in basal layer",
+       visType = c("Tissue", "Subcell"))
+```
+
+*PDGFB gene* (https://www.proteinatlas.org/ENSG00000100311-PDGFB/tissue/skin)
+- ubiquitous cytoplasmic expression
+```{r}
+skinHistology %>%
+  dplyr::filter(gene == "PDGFB")
+
+hpaVis(data = subsetData,
+       targetGene = 'ENSG00000100311',
+       targetTissue = c('skin', 'skin 1', 'skin 2'),
+       targetCellType = "cells in basal layer",
+       visType = c("Tissue", "Subcell"))
+```
+
+*APOA4 gene* (https://www.proteinatlas.org/ENSG00000110244-APOA4)
+```{r}
+skinHistology %>%
+  dplyr::filter(gene == "APOA4")
+
+hpaVis(data = subsetData,
+       targetGene = 'ENSG00000110244',
+       targetTissue = c('skin', 'skin 1', 'skin 2'),
+       targetCellType = "cells in basal layer",
+       visType = c("Tissue", "Subcell"))
+```
+

@@ -1,0 +1,4251 @@
+---
+title: "The Matrisome Workflow"
+output: html_notebook
+---
+
+```{r}
+# Install packages
+install.packages(c("tidyverse", "here", "openxlsx", "rstatix", "correlation"))
+```
+
+```{r}
+# Load the packages
+library(tidyverse)
+library(here)
+library(openxlsx)
+library(rstatix)
+library(ggpubr)
+theme_set(
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 12, colour = "black"),
+    axis.title = element_text(size = 13),
+    title = element_text(size = 14),
+    legend.position = "top",
+    legend.title = element_blank(),
+    plot.title = element_text(hjust = 0.5))
+  )
+library(ggsci)
+library(scales)
+library(correlation)
+```
+
+```{r}
+# Import the data
+full_ECM <- read.xlsx(here("data", "ECM_data.xlsx"))
+full_ECM
+
+# Manipulate the data
+ECM <- full_ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+
+ECM$Unknown_code_1 <- NULL
+ECM$Unknown_code_2 <- NULL
+
+tidy_antibody_names <- function(respiratoryRes) {
+  respiratoryRes$Antibody_name <- gsub("^Antibody ", "", respiratoryRes$Antibody_name)
+  return(respiratoryRes)
+}
+
+ECM <- tidy_antibody_names(ECM)
+```
+
+```{r}
+# Age grouping
+ECM$Age2 <- as.numeric(as.character(ECM$Age))
+
+ECM <- ECM %>%
+  mutate(Age2 = case_when(
+    Age2 < 40 ~ "< 40", # young
+    Age2 >= 40 & Age2 < 60 ~ "40-60", # middle-aged
+    Age2 >= 60 ~ "≥ 60" # elderly
+  )) %>%
+  drop_na()
+
+ECM %>%
+  count(Age2)
+
+level_order <- c('< 40', '40-60', '≥ 60')
+```
+
+# Structure of the raw data and visualisation
+```{r}
+# Summary statistics
+ECM %>%
+get_summary_stats()
+```
+
+How many subjects (sexes), antibodies, genes and tissues are in the entire dataset?
+
+## Subjects
+```{r}
+ECM %>%
+  count(Subject_ID) # 1,268 patients
+
+ECM %>%
+  count(Sex) # Female-dominated data set
+
+# Subjects divided by biological sex
+subjectsPlot <- ECM %>%
+  group_by(Age2) %>%
+  count(Subject_ID) %>%
+  count(Subject_ID) %>%
+  count(Age2)
+
+subjectsPlot <- inner_join(subjectsPlot, ECM)
+
+subjectsPlot %>%
+  select(Age2, Subject_ID, n, Sex) %>%
+  unique() %>%
+  group_by(Sex) %>%
+  count(Age2) %>%
+  ggplot() + aes(x = Age2, y = n, colour = Sex, fill = Sex, label = n) + geom_col(position = position_dodge()) + 
+  scale_colour_npg() + scale_fill_npg() + ylab("Number of subjects") + xlab("Age") +
+  ggtitle("Number of subjects divided by biological sex") + 
+  geom_text(position = position_dodge(width = 1), vjust = -0.5, size = 3)
+
+ggsave(here("output/subjectsHistogram.tiff"), height = 7, width = 7)
+```
+
+## Samples
+```{r}
+# Samples divided by biological sex
+level_order <- c('< 40', '40-60', '≥ 60')
+
+ECM %>%
+  group_by(Age2) %>%
+  count(Sex) %>%
+  ggplot() + aes(x = Age2, y = n, colour = Sex, fill = Sex, label = n) +
+  geom_col(position = position_dodge()) + scale_colour_npg() + scale_fill_npg() +
+  ylab("Number of samples") + xlab("Age") + scale_x_discrete(limits = level_order) + 
+  geom_text(position = position_dodge(width = 1), vjust = -0.5, size = 3) +
+  ggtitle("Number of samples divided by biological sex")
+
+ggsave(here("output/samplesHistogram.tiff"), height = 7, width = 7)
+```
+
+## Age
+```{r}
+ageSumStat <- ECM %>%
+  select(Age, Sex) %>%
+  group_by(Sex) %>%
+  get_summary_stats(type = "five_number")
+
+ageB <- ECM %>%
+  ggplot() + aes(x = Age, fill = Sex) + geom_bar() + scale_color_npg() + scale_fill_npg() + 
+  ggtitle("Age distribution in the filtered data") + 
+  geom_vline(xintercept = 40, linetype = "dashed", colour = "gray", size = 0.5) + 
+  geom_vline(xintercept = 60, linetype = "dashed", colour = "gray", size = 0.5) + ylab("Count of subjects") +
+  annotate("text", x=8.5, y=6850, label= "Min = 1 ", size = 3.25) +
+  annotate("text", x=8.85, y=6625, label= "q25 = 36", size = 3.25) +
+  annotate("text", x=10.3, y=6400, label= "Median = 54", size = 3.25) +
+  annotate("text", x=8.85, y=6175, label= "q75 = 64", size = 3.25) +
+  annotate("text", x=9.025, y=5950, label= "Max = 93", size = 3.25) + 
+  scale_x_continuous(breaks = seq(0, 93, by = 10), limits = c(0, 93), expand = c(0, 0))
+ggsave(here("output/ageBar1.tiff"), height = 7, width = 7)
+
+ageV <- ECM %>%
+  ggplot() + aes(x = Age2, y = Age, colour = Sex) + geom_violin(position = position_dodge(0.9), trim = FALSE) + geom_boxplot(width = 0.15, position = position_dodge(0.9)) + 
+  scale_color_npg() + scale_fill_npg() + scale_x_discrete(limits = level_order) +
+  ggtitle("Age descriptive statistics") + xlab("Age category") + ylab("Age")
+ggsave(here("output/ageViolin.tiff"), height = 7, width = 7)
+
+#ggarrange(
+#  ageB, ageV,
+#  common.legend = FALSE, legend = "top"
+#  )
+
+#ggsave(here("output/ageViolinBar.tiff"), height = 7, width = 10)
+```
+
+## Antibodies and genes
+```{r}
+# Counts
+ECM %>%
+  count(Antibody_name) %>%
+  arrange(desc(n)) # 1,268 antibody types
+
+ECM %>% 
+  count(Gene_name) # 734 genes
+```
+
+```{r}
+# Grouping antibodies by PatientIDs
+ECM %>%
+  group_by(Subject_ID) %>%
+  count(Antibody_name) %>%
+  arrange(desc(n))
+
+# Grouping the antibodies based on Age
+ECM %>%
+  group_by(Age2) %>%
+  count(Antibody_name) %>%
+  arrange(desc(Antibody_name))
+
+# How many antibodies represents X gene?
+nProt <- ECM %>%
+  select(Antibody_name, Gene_name) %>%
+  unique() %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+AbProtPlot <- inner_join(ECM, nProt)
+AbProtPlot$abN <- AbProtPlot$n 
+
+# What % of proteins is represented by 1, 2, 3, 4, or 5?
+percentProt <- AbProtPlot %>%
+  select(Antibody_name, Gene_name, abN) %>%
+  unique() %>%
+  ungroup() %>%
+  select(Gene_name, abN) %>%
+  unique() %>%
+  count(abN)
+
+percentProt <- percentProt %>% 
+  mutate(percent = round((n/734)*100, 2))
+
+percentProt %>%
+  ggplot() + aes(x = abN, y = percent, colour = "#E64B35", fill = "#E64B35", label = n) + geom_col() + 
+  xlab("Number of antibodies") + ylab("Proteins represented (%)") + theme(legend.position="none") +
+  scale_x_continuous(breaks = seq(1, 7, by = 1)) + ggtitle("Number of antibodies representing individual proteins") +
+  geom_text(position = position_dodge(width = 1), vjust = -0.5, size = 3) + scale_color_npg() + scale_fill_npg()
+
+ggsave(here("output/AbPercentPlot.tiff"), height = 7, width = 7)
+```
+
+## Images
+```{r}
+# Grouping the images based on Ab
+imgN <- ECM %>%
+  group_by(Antibody_name) %>%
+  count(Image_file) %>%
+  drop_na() %>%
+  arrange(desc(Image_file)) %>%
+  count(Antibody_name) %>%
+  arrange(desc(n)) # 1268 antibodies, 1206 represented by IHC images
+
+AbImgPlot <- inner_join(ECM, imgN)
+AbImgPlot$imgN <- AbImgPlot$n 
+
+# What % of antibodies is represented by 1, 2, 3, 4, or 5 images?
+percentProt2 <- AbImgPlot %>%
+  select(Antibody_name, Image_file, imgN) %>%
+  unique() %>%
+  ungroup() %>%
+  select(Antibody_name, imgN) %>%
+  unique() %>%
+  arrange(desc(imgN)) %>% # imgN = n(img) per antibody
+  count(imgN) # n = number of antibodies represented by imgN images
+
+percentProt2 <- percentProt2 %>% 
+  mutate(percent = round((n/1206)*100, 2))
+# imgN = n(img) representing 
+
+percentProt2 %>%
+  ggplot() + aes(x = imgN, y = percent, colour = "#E64B35", fill = NA, label = n) + geom_col() + 
+  xlab("Number of images") + ylab("Antibodies represented (%)") + 
+  theme(legend.position="none", panel.grid = element_line(colour = "white")) +
+  ggtitle("Number of IHC images per antibody") + scale_x_continuous(breaks = seq(82, 138, by = 10)) +
+  geom_text(position = position_dodge(width = 1), vjust = -0.5, size = 3) + scale_color_npg() + scale_fill_npg()
+              
+ggsave(here("output/IMGperAbPlot.tiff"), height = 7, width = 7)
+```
+
+# Inferential statistics: does the protein expression across the 3 age categories (young, middle-aged, elderly) statistically differ?
+## Normality testing
+```{r}
+# Density plot: intensity distribution
+dp1 <- ECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Intensity distribution") + ylab("Density")
+# not a normal distribution -> positively skewed
+
+# Quantile-quantile plot: intensity distribution
+qqp1 <- ECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(sample = Intensity, colour = Age2) + geom_qq() + geom_qq_line() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Q-Q plot of intensities") + 
+  ylab("Sample quantiles") + xlab("Theoretical quantiles")
+# not a normal distribution -> upward curve shape, which is the norm for positively skewed data
+
+ggarrange(
+  dp1, qqp1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/density-and-qq2.tiff"), height = 4, width = 9)
+```
+
+## Non-parametric testing: Kruskal-Wallis -> is there a significant difference in intensity between different age groups across tissue types?
+```{r}
+# Intensity
+doKruskalTest <- function(x) {
+  x %>%
+    kruskal_test(Intensity~Age2) %>%
+  print(kruskalTest)
+}
+
+a <- ECM %>%
+  group_by(Tissue_type_1) %>%
+  nest()
+
+a$data[[1]]
+
+a <- ECM %>%
+  group_by(Tissue_type_1) %>%
+  nest() %>%
+  mutate(Kruskal = map(data, doKruskalTest))
+
+a$Kruskal[[1]]
+
+# Tidy the data frames
+a <- a %>%
+  unnest()
+
+kruskalResults <- a %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, statistic, df, p) %>%
+  unique() %>%
+  dplyr::filter(p < 0.001) %>%
+  group_by(Tissue_type_1) %>%
+  arrange(.by_group = TRUE)
+kruskalResults
+
+kruskalResults %>%
+  count(Tissue_type_1) # 34 tissues have sig difference
+```
+
+## Post-hoc analysis: Dunn's test -> which age groups significantly statistically differ across tissue types?
+```{r}
+# Intensity
+doDunnsTest <- function(x) {
+    x %>%
+    dunn_test(Intensity~Age2) %>%
+  print(dunnsTest)
+  }
+
+b <- a %>%
+  group_by(Tissue_type_1) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest()
+
+b$data[[1]]
+
+b <- a %>%
+  group_by(Tissue_type_1) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest() %>%
+  mutate(Dunn = map(data, doDunnsTest))
+
+b$Dunn[[1]]
+
+# Tidy the data frames
+b <- b %>%
+  unnest(data) %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, Dunn) %>%
+  unnest(Dunn)
+
+dunnResults <- b %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, group1, group2, n1, n2, statistic, p, p.adj.signif) %>%
+  dplyr::filter(p < 0.001) %>%
+  group_by(Tissue_type_1) %>%
+  arrange(.by_group = TRUE)
+dunnResults 
+```
+
+### Among 34 tissue types with significant differences across age groups, which genes do significantly statistically differ in intensity?
+```{r}
+# Kruskal-Wallis 
+c <- b %>%
+  group_by(Gene_name) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest()
+
+c$data[[1]]
+
+c <- b %>%
+  group_by(Gene_name) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest() %>%
+  mutate(Kruskal = map(data, doKruskalTest))
+
+c$Kruskal[[1]]
+
+# Tidy the data frames
+c <- c %>%
+  unnest(data) %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, Kruskal) %>%
+  unnest(Kruskal)
+
+kruskalGenes <- c %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, n, statistic, df, p) %>%
+  dplyr::filter(p < 0.001)
+kruskalGenes #73 genes
+```
+
+#### Which age groups significantly statistically differ in each of those 73 genes?
+```{r}
+# Dunn's Test 
+d <- c %>%
+  group_by(Gene_name) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest()
+
+d$data[[1]]
+
+d <- c %>%
+  group_by(Gene_name) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest() %>%
+  mutate(Dunn = map(data, doDunnsTest))
+
+d$Dunn[[1]]
+
+# Tidy the data frames
+d <- d %>%
+  unnest(data) %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, Dunn) %>%
+  unnest(Dunn)
+
+dunnResults <- d %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, group1, group2, n1, n2, statistic, p, p.adj.signif) %>%
+  dplyr::filter(p < 0.001) %>%
+  group_by(Gene_name) %>%
+  arrange(.by_group = TRUE)
+dunnResults #72 genes
+```
+
+# Differential expression exploration
+```{r}
+# Sig DE genes in order of the most to least frequently occuring ones
+dunnResults %>%
+  ungroup() %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+```
+
+```{r}
+# Filtering the data into similar tissue groups
+brainRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("basal+ganglia", "cerebellum", "cerebral+cortex", "hippocampal+formation"))
+
+respiratoryRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("bronchus", "lung"))
+
+digestiveRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("duodenum", "esophagus", "gallbladder", "oral+mucosa", "salivary+gland", "small+intestine", "pancreas"))
+
+femaleRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("cervix%2C+uterine", "endometrium", "fallopian+tube", "placenta"))
+
+maleRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("testis", "prostate", "seminal+vesicle"))
+
+muscleRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("heart+muscle", "skeletal+muscle"))
+
+endocrineRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("adrenal+gland", "parathyroid+gland", "thyroid+gland"))
+
+metabolicRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("spleen", "liver"))
+
+adiposeRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("adipose+tissue", "soft+tissue"))
+
+# Unclassified: bone marrow, breast, skin, tonsil, urinary bladder
+
+boneRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == "bone+marrow")
+
+breastRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == "breast")
+
+skinRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == "skin")
+
+tonsilRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == "tonsil")
+
+bladderRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == "urinary+bladder")
+
+# Function for automated linear regression plots
+plotLinReg <- function(x) {
+  x %>%
+    ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + 
+    geom_point() + facet_wrap(~Tissue_type_1, scales = "free_x") + geom_smooth(method = "lm")
+}
+```
+
+## brainRes
+```{r}
+# Most to least frequently occurring DE proteins in the data set
+brainRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+brainLinReg <- brainRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+brainLinReg$data[[1]]
+
+brainLinReg <- brainRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+brainLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(brainLinReg$LinReg)) {
+  print(brainLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in brainRes
+```{r}
+# Significantly DE in basal ganglia
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("ACAT1", "COL6A1", "LAMP2", "NAV2"), Tissue_type_1 == "basal+ganglia") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("ACAT1", "COL6A1", "LAMP2", "NAV2"), Tissue_type_1 == "basal+ganglia") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+# no good
+
+# Significantly DE in cerebellum
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("ACAT1", "AMBP", "IMPG1", "MMP24", "PLSCR1"), Tissue_type_1 == "cerebellum") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+`%!in%` <- negate(`%in%`) 
+
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("ACAT1", "AMBP", "IMPG1", "MMP24", "PLSCR1"), Tissue_type_1 == "cerebellum", Antibody_name %!in% c("HPA001497", "HPA030333", "HPA030332")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+# no good
+
+# Significantly DE in cerebral cortex
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("B4GALT1", "LRP5", "MMP9", "SDC2"), Tissue_type_1 == "cerebral+cortex") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("B4GALT1", "LRP5", "MMP9", "SDC2"), Tissue_type_1 == "cerebral+cortex", Antibody_name != "CAB000348") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+# no good 
+
+# Significantly DE in hippocampal formation
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("ABAT", "C4BPA", "TGM2"), Tissue_type_1 == "hippocampal+formation") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+brainRes %>%
+  dplyr::filter(Gene_name %in% c("ABAT", "C4BPA", "TGM2"), Tissue_type_1 == "hippocampal+formation") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+# no good - not enough samples per antibody
+```
+
+## respiratoryRes
+```{r}
+# Most frequently occurring DE proteins in the data set
+respiratoryRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+respiratoryLinReg <- respiratoryRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+respiratoryLinReg$data[[1]]
+
+respiratoryLinReg <- respiratoryRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+respiratoryLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(respiratoryLinReg$LinReg)) {
+  print(respiratoryLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in respiratoryRes
+```{r}
+# Significantly DE in bronchus
+respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("APOA4", "EPYC", "GPM6B"), Tissue_type_1 == "bronchus", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("APOA4", "EPYC", "GPM6B", "SH3PXD2B"), Tissue_type_1 == "bronchus", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in lung
+respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "MDH2", "SH3PXD2B", "TFPI2"), Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "MDH2", "SH3PXD2B", "TFPI2"), Tissue_type_1 == "lung", Antibody_name != "Antibody HPA029072") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+#### Bronchus
+##### APOA4
+```{r}
+bp1 <- respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("APOA4"), Tissue_type_1 == "bronchus", Antibody_name %in% c("CAB068250", "CAB068251")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.97) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("APOA4")
+
+bp2 <- respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("APOA4"), Tissue_type_1 == "bronchus", Antibody_name %in% c("CAB068250", "CAB068251", "CAB068252", "HPA002549")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("APOA4") + xlab("Age")
+
+ggarrange(
+  bp1, bp2,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/bronchus/APOA4.tiff"))
+```
+
+##### EPYC
+```{r}
+results <- respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("EPYC"), Tissue_type_1 == "bronchus", Antibody_name != "HPA001352")
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "bronchus", Antibody_name != "HPA001352") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "bronchus", Gene_name == "EPYC") 
+
+# Linear regression and pairwise-comparison visualization
+bp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "bronchus", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+bp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "bronchus", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("EPYC") + xlab("Age") + stat_compare_means(comparisons = my_comparisons) 
+
+ggarrange(
+  bp3, bp4,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/bronchus/EPYC.tiff"))
+```
+
+##### GPM6B
+```{r}
+bp5 <- respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("GPM6B"), Tissue_type_1 == "bronchus", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("GPM6B") 
+
+bp6 <- respiratoryRes %>%
+  dplyr::filter(Gene_name %in% c("GPM6B"), Tissue_type_1 == "bronchus", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("GPM6B") + xlab("Age")
+  
+ggarrange(
+  bp5, bp6,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/bronchus/GPM6B.tiff"))
+```
+
+#### Lung
+##### ALDH6A1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "lung", Antibody_name != "HPA029072") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "lung", Gene_name == "ALDH6A1")
+
+# Linear regression and pairwise-comparison visualization
+lp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "lung", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.625, method = "spearman") +
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+lp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "lung", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  lp1, lp2,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/lung/ALDH6A1.tiff"))
+
+lp1 <- respiratoryRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "lung", Antibody_name != "HPA029072") %>%
+  unique()
+
+lp1 <- respiratoryRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "lung", Antibody_name != "HPA029072")
+results <- full_join(results, lp1)
+```
+
+##### MDH2
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "lung") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "lung", Gene_name == "MDH2")
+
+# Linear regression and pairwise-comparison visualization
+lp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.25, method = "spearman") +
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MDH2") + guides(color = guide_legend(nrow = 2))
+
+lp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MDH2") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  lp3, lp4,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/lung/MDH2.tiff"))
+
+lp3 <- respiratoryRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "lung")
+results <- full_join(results, lp3)
+```
+
+##### SH3PXD2B
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "lung") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "lung", Gene_name == "SH3PXD2B")
+
+# Linear regression and pairwise-comparison visualization
+lp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.25, method = "spearman") +
+  scale_colour_npg() + scale_fill_npg() + ggtitle("SH3PXD2B")
+
+lp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("SH3PXD2B") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  lp5, lp6,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/lung/SH3PXD2B.tiff"))
+
+lp5 <- respiratoryRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "lung")
+results <- full_join(results, lp5)
+```
+
+##### TFPI2
+```{r}
+lp7 <- respiratoryRes %>%
+  dplyr::filter(Gene_name == "TFPI2", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.25) +
+  scale_colour_npg() + scale_fill_npg() + ggtitle("TFPI2")
+
+lp8 <- respiratoryRes %>%
+  dplyr::filter(Gene_name == "TFPI2", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("TFPI2") + xlab("Age")
+
+ggarrange(
+  lp7, lp8,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/lung/TFPI2.tiff"))
+```
+
+## digestiveRes
+```{r}
+# Most frequently occuring DE proteins in the data set
+digestiveRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+digestiveLinReg <- digestiveRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+digestiveLinReg$data[[1]]
+
+digestiveLinReg <- digestiveRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+digestiveLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(digestiveLinReg$LinReg)) {
+  print(digestiveLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in digestiveRes
+```{r}
+# Significantly DE in duodenum
+digestiveRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "duodenum", Antibody_name %!in% c("HPA019848", "HPA026720")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+digestiveRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "duodenum", Antibody_name %!in% c("HPA019848", "HPA026720")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in gallbladder
+digestiveRes %>%
+  dplyr::filter(Gene_name %in% c("EPYC", "IGFBP7"), Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+digestiveRes %>%
+  dplyr::filter(Gene_name %in% c("EPYC", "IGFBP7"), Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in pancreas
+digestiveRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "pancreas") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+digestiveRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "pancreas") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in salivary gland
+digestiveRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "salivary+gland") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+digestiveRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "salivary+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+#### Duodenum
+##### MHD2
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "duodenum") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "duodenum", Gene_name == "MDH2")
+
+# Linear regression and data visualization
+dp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "duodenum", Antibody_name %!in% c("HPA019848", "HPA026720")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MDH2")
+
+dp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "duodenum", Antibody_name %!in% c("HPA019848", "HPA026720")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MDH2")
+
+dp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "duodenum", Antibody_name %!in% c("HPA019848", "HPA026720")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MDH2") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  dp1, dp2, dp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/digestiveRes/duodenum/MDH2.tiff"), height = 7, width = 9)
+
+dp1 <- digestiveRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "duodenum", Antibody_name %!in% c("HPA019848", "HPA026720"))
+results <- full_join(results, dp1)
+```
+
+#### Gallbladder
+##### EPYC
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "gallbladder") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+my_comparisons <- list(c("< 40", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "gallbladder", Gene_name == "EPYC")
+
+# Linear regression and data visualization 
+gp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+gp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC") 
+
+gp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("EPYC") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  gp1, gp2, gp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/digestiveRes/gallbladder/EPYC.tiff"), height = 7, width = 9)
+
+gp1 <- digestiveRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "gallbladder")
+results <- full_join(results, gp1)
+```
+
+##### IGFBP7
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "IGFBP7", Tissue_type_1 == "gallbladder") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+my_comparisons <- list(c("< 40", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "gallbladder", Gene_name == "IGFBP7")
+
+# Linear regression and data visualization 
+gp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "IGFBP7", Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.125, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("IGFBP7")
+
+gp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "IGFBP7", Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.40, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("IGFBP7")
+
+gp6 <- digestiveRes %>%
+  dplyr::filter(Gene_name == "IGFBP7", Tissue_type_1 == "gallbladder") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("IGFBP7") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  gp4, gp5, gp6,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/digestiveRes/gallbladder/IGFBP7.tiff"), height = 7, width = 9)
+
+gp4 <- digestiveRes %>%
+  dplyr::filter(Gene_name == "IGFBP7", Tissue_type_1 == "gallbladder")
+results <- full_join(results, gp4)
+```
+
+#### Pancreas
+##### EPYC
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "pancreas") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+my_comparisons <- list(c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "pancreas", Gene_name == "EPYC")
+
+# Linear regression and data visualization 
+pap1 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "pancreas") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+pap2 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "pancreas") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+pap3 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "pancreas") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("EPYC") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  pap1, pap2, pap3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/digestiveRes/pancreas/EPYC.tiff"), height = 7, width = 9)
+
+pap1 <- digestiveRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "pancreas")
+results <- full_join(results, pap1)
+```
+
+#### Salivary gland
+##### EPYC
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "salivary+gland") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+my_comparisons <- list(c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "salivary+gland", Gene_name == "EPYC")
+
+# Linear regression and data visualization 
+sgp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "salivary+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.1, label.y.npc = 0.97, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+sgp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "salivary+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.80, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+sgp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "salivary+gland") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("EPYC") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  sgp1, sgp2, sgp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/digestiveRes/salivary_gland/EPYC.tiff"), height = 7, width = 9)
+
+sgp1 <- digestiveRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "salivary+gland")
+results <- full_join(results, sgp1)
+```
+
+## femaleRes
+```{r}
+# Most frequently occuring DE proteins in the data set
+femaleRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+femaleLinReg <- femaleRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+femaleLinReg$data[[1]]
+
+femaleLinReg <- femaleRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+femaleLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(femaleLinReg$LinReg)) {
+  print(femaleLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in femaleRes
+```{r}
+# Significantly DE in cervix and uterine tissue
+femaleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+femaleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in endometrium
+femaleRes %>%
+  dplyr::filter(Gene_name %in% c("ADGRG6", "CCBE1", "F13A1", "SH3PXD2B"), Tissue_type_1 == "endometrium") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+femaleRes %>%
+  dplyr::filter(Gene_name %in% c("ADGRG6", "CCBE1", "F13A1", "SH3PXD2B"), Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+#### Cervix and uterine
+##### ALDH6A1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pairwiseComparison <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison$Gene <- "ALDH6A1"
+pairwiseComparison$Tissue <- "cervix%2C+uterine"
+pairwiseComparison <- pairwiseComparison %>%
+  relocate(Tissue, Gene, .before = .y.)
+
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+my_comparisons <- list(c("40-60", "< 40"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "cervix%2C+uterine", Gene_name == "ALDH6A1")
+
+# Linear regression and data visualization 
+cup1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg()
+
+cup2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(colour = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.27, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg()
+
+cup3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  cup1, cup2, cup3, nrow = 1,
+  common.legend = FALSE, legend = "top", labels = c("c", "d", "e")
+  )
+
+ggsave(here("output/femaleRes/cervix_uterine/ALDH6A1_ggarranged.tiff"), height = 4, width = 9)
+
+cup1 <- femaleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine", Antibody_name != "HPA029072")
+results <- full_join(results, cup1)
+```
+
+#### Endometrium
+##### ADGRG6
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "ADGRG6", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+my_comparisons <- list(c("40-60", "< 40"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "ADGRG6")
+
+# Linear regression and data visualization 
+ep1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADGRG6", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ADGRG6") 
+
+ep2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADGRG6", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ADGRG6") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  ep1, ep2,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/femaleRes/endometrium/ADGRG6.tiff"), height = 7, width = 9)
+
+ep1 <- femaleRes %>%
+  dplyr::filter(Gene_name == "ADGRG6", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155")
+results <- full_join(results, ep1)
+```
+
+##### CCBE1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc11 <- finalRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pwc11$Tissue <- "endometrium"
+pwc11$Gene <- "CCBE1"
+pwc11 <- pwc11 %>%
+  relocate(Tissue, Gene, .before = ".y.")
+pairwiseComparison <- full_join(pairwiseComparison, pwc11)
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "CCBE1")
+
+# Linear regression and data visualization 
+ep3 <- finalRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("CCBE1") 
+
+ep4 <- finalRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("CCBE1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  ep3, ep4,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/femaleRes/endometrium/CCBE1.tiff"), height = 7, width = 9)
+
+ep3 <- femaleRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155")
+results <- full_join(results, ep3)
+```
+
+##### F13A1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc12 <- finalRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pwc12$Tissue <- "endometrium"
+pwc12$Gene <- "F13A1"
+pwc12 <- pwc12 %>%
+  relocate(Tissue, Gene, .before = ".y.")
+pairwiseComparison <- full_join(pairwiseComparison, pwc12)
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "F13A1")
+
+# Linear regression and data visualization
+ep5 <- finalRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("F13A1") 
+
+ep6 <- finalRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("F13A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  ep5, ep6,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/femaleRes/endometrium/F13A1.tiff"), height = 7, width = 9)
+
+ep5 <- femaleRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155")
+results <- full_join(results, ep5)
+```
+
+##### SH3PXD2B
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "SH3PXD2B")
+
+# Linear regression and data visualization
+ep7 <- finalRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("SH3PXD2B")
+
+ep8 <- finalRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("SH3PXD2B") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  ep7, ep8,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/femaleRes/endometrium/SH3PXD2B.tiff"), height = 7, width = 9)
+
+ep7 <- femaleRes %>%
+  dplyr::filter(Gene_name == "SH3PXD2B", Tissue_type_1 == "endometrium", Antibody_name != "CAB002155")
+results <- full_join(results, ep7)
+```
+
+## maleRes
+```{r}
+maleRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+maleLinReg <- maleRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+maleLinReg$data[[1]]
+
+maleLinReg <- maleRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+maleLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(maleLinReg$LinReg)) {
+  print(maleLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in maleRes
+```{r}
+# Significantly DE in prostate
+maleRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "HP"), Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+maleRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "HP"), Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Limitation: HPA research teams not covering all cell types belonging to a particular tissue to an equal extent in all patient samples, leading to misleading numerical data
+## ALDH6A1 -> 'sig DE' according to the numbers but considering the IHC images, not sig DE because the samples from younger patients captured more glandular cells, which is where the protein is located and where majority of the staining occurs, than those of older patients, creating a potentially misleading conclusion in the analysis of quantitative proteomics data obtained from IHC images. 
+
+# Significantly DE in seminal vesicle
+maleRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "seminal+vesicle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+maleRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "seminal+vesicle", Antibody_name %!in% c("CAB068250", "HPA001352")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in testis
+maleRes %>%
+  dplyr::filter(Gene_name %in% c("APOA4", "CCBE1"), Tissue_type_1 == "testis") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+maleRes %>%
+  dplyr::filter(Gene_name %in% c("APOA4", "CCBE1"), Tissue_type_1 == "testis") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+#### Prostate
+##### ALDH6A1
+```{r}
+# Example of the importance of covering different tissue-specific cell types in IHC samples to make them reproducible for further research
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+maleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "prostate") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "prostate", Gene_name == "ALDH6A1")
+
+# Linear regression and data visualization
+pp1 <- maleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+pp2 <- maleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+pp3 <- maleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  pp1, pp2, pp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/maleRes/prostate/ALDH6A1.tiff"), height = 7, width = 9)
+```
+
+##### HP
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "HP", Tissue_type_1 == "prostate") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "prostate", Gene_name == "HP")
+
+# Linear regression and data visualization
+pp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "HP", Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.15, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("HP")
+
+pp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "HP", Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.40, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("HP")
+
+pp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "HP", Tissue_type_1 == "prostate") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("HP") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  pp4, pp5, pp6,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/maleRes/prostate/HP.tiff"), height = 7, width = 9)
+
+pp4 <- maleRes %>%
+  dplyr::filter(Gene_name == "HP", Tissue_type_1 == "prostate")
+results <- full_join(results, pp4)
+```
+
+#### Seminal vesicle
+##### EPYC
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "seminal+vesicle") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "seminal+vesicle", Gene_name == "EPYC")
+
+# Linear regression and data visualization
+svp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "seminal+vesicle") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+svp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "seminal+vesicle") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPYC")
+
+svp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "seminal+vesicle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("EPYC") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  svp1, svp2, svp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/maleRes/seminal_vesicle/EPYC.tiff"), height = 7, width = 9)
+
+svp1 <- maleRes %>%
+  dplyr::filter(Gene_name == "EPYC", Tissue_type_1 == "seminal+vesicle")
+results <- full_join(results, svp1)
+```
+
+#### Testis
+##### APOA4
+```{r}
+maleRes %>%
+  dplyr::filter(Gene_name == "APOA4", Tissue_type_1 == "testis") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "< 40"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+tp1 <- maleRes %>%
+  dplyr::filter(Gene_name == "APOA4", Tissue_type_1 == "testis", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("APOA4")
+
+tp2 <- maleRes %>%
+  dplyr::filter(Gene_name == "APOA4", Tissue_type_1 == "testis", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("APOA4")
+
+tp3 <- maleRes %>%
+  dplyr::filter(Gene_name == "APOA4", Tissue_type_1 == "testis", Antibody_name != "HPA001352") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("APOA4") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  tp1, tp2, tp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/maleRes/testis/APOA4.tiff"), height = 7, width = 9)
+```
+
+##### CCBE1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "testis") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "< 40"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "testis", Gene_name == "CCBE1")
+
+# Linear regression and data visualization
+tp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "testis") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("CCBE1")
+
+tp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "testis") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("CCBE1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  tp4, tp5, 
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/maleRes/testis/CCBE1.tiff"), height = 7, width = 9)
+
+tp4 <- maleRes %>%
+  dplyr::filter(Gene_name == "CCBE1", Tissue_type_1 == "testis")
+results <- full_join(results, tp4)
+```
+
+## muscleRes
+```{r}
+muscleRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+muscleLinReg <- muscleRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+muscleLinReg$data[[1]]
+
+muscleLinReg <- muscleRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+muscleLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(muscleLinReg$LinReg)) {
+  print(muscleLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in muscleRes
+```{r}
+muscleLinReg
+# Significantly DE in heart muscle
+muscleRes %>%
+  dplyr::filter(Gene_name %in% c("COASY", "CTSV", "DECR1", "HPR", "ITGAM", "ZP3"), Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+muscleRes %>%
+  dplyr::filter(Gene_name %in% c("COASY", "CTSV", "DECR1", "HPR", "ITGAM", "ZP3"), Tissue_type_1 == "heart+muscle", Antibody_name %!in% c("Antibody HPA022875", "Antibody HPA023160")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in skeletal muscle
+muscleRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COASY", "HDGF", "SH3PXD2B"), Tissue_type_1 == "skeletal+muscle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+muscleRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COASY", "CTSV", "HDGF", "NTN1", "SH3PXD2B"), Tissue_type_1 == "skeletal+muscle", Antibody_name %!in% c("CAB026035", "Antibody HPA022875")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+#### Heart muscle
+##### CTSV
+```{r}
+hmp1 <- muscleRes %>%
+  dplyr::filter(Gene_name == "CTSV", Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("CTSV")
+
+hmp2 <- muscleRes %>%
+  dplyr::filter(Gene_name == "CTSV", Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("CTSV") + xlab("Age")
+
+ggarrange(
+  hmp1, hmp2, 
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/muscleRes/heart/CTSV.tiff"), height = 7, width = 9)
+```
+
+##### HPR
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "heart+muscle") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "heart+muscle", Gene_name == "HPR")
+
+# Linear regression and data visualization
+hmp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("HPR")
+
+hmp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("HPR") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  hmp3, hmp4, 
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/muscleRes/heart/HPR.tiff"), height = 7, width = 9)
+
+hmp3 <- muscleRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "heart+muscle")
+results <- full_join(results, hmp3)
+```
+
+##### ITGAM
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc9 <- finalRes %>%
+  dplyr::filter(Gene_name == "ITGAM", Tissue_type_1 == "heart+muscle") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pwc9$Tissue <- "heart+muscle"
+pwc9$Gene <- "ITGAM"
+pwc9 <- pwc9 %>%
+  relocate(Tissue, Gene, .before = ".y.")
+pairwiseComparison <- full_join(pairwiseComparison, pwc9)
+#pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "ITGAM")
+#pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow", "urinary+bladder", "liver", "spleen", "skin", "skin", "skin", "urinary+bladder", "urinary+bladder", "urinary+bladder", "heart+muscle")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "heart+muscle", Gene_name == "ITGAM")
+
+# Linear regression and data visualization
+hmp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "ITGAM", Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ITGAM")
+
+hmp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "ITGAM", Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ITGAM")
+
+hmp7 <- finalRes %>%
+  dplyr::filter(Gene_name == "ITGAM", Tissue_type_1 == "heart+muscle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ITGAM") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  hmp5, hmp6, hmp7, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/muscleRes/heart/ITGAM.tiff"), height = 7, width = 9)
+
+hmp5 <- muscleRes %>%
+  dplyr::filter(Gene_name == "ITGAM", Tissue_type_1 == "heart+muscle")
+results <- full_join(results, hmp5)
+```
+
+#### Skeletal muscle
+##### ALDH6A1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "skeletal+muscle") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle")
+
+my_comparisons <- list(c("< 40", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+# Correlation testing
+corr %>%
+  dplyr::filter(Tissue_type_1 == "skeletal+muscle", Gene_name == "ALDH6A1")
+
+# Linear regression and data visualization
+smp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "skeletal+muscle") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.15, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+smp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "skeletal+muscle") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.23, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+smp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "skeletal+muscle") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  smp1, smp2, smp3, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/muscleRes/skeletal/ALDH6A1.tiff"), height = 7, width = 9)
+
+smp1 <- muscleRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "skeletal+muscle")
+results <- full_join(results, smp1)
+```
+
+##### COASY
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc13 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "skeletal+muscle") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pwc13$Tissue <- "skeletal+muscle"
+pwc13$Gene <- "COASY"
+pwc13 <- pwc13 %>%
+  relocate(Tissue, Gene, .before = ".y.")
+pairwiseComparison <- full_join(pairwiseComparison, pwc13)
+
+my_comparisons <- list(c("< 40", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "skeletal+muscle", Gene_name == "COASY")
+
+# Linear regression and data visualization
+smp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "skeletal+muscle", Antibody_name != "HPA022875") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.1, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COASY")
+
+smp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "skeletal+muscle", Antibody_name != "HPA022875") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.2, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COASY")
+
+smp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "skeletal+muscle", Antibody_name != "HPA022875") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("COASY") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  smp3, smp4, smp5, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/muscleRes/skeletal/COASY.tiff"), height = 7, width = 9)
+
+smp3 <- muscleRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "skeletal+muscle", Antibody_name != "HPA022875")
+results <- full_join(results, smp3)
+```
+
+##### HDGF
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "skeletal+muscle") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "skeletal+muscle", Gene_name == "HDGF")
+
+# Linear regression and data visualization
+smp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "skeletal+muscle", Antibody_name != "CAB026035") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("HDGF")
+
+smp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "skeletal+muscle", Antibody_name != "CAB026035") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("HDGF") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  smp5, smp6, 
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/muscleRes/skeletal/HDGF.tiff"), height = 7, width = 9)
+
+smp5 <- muscleRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "skeletal+muscle", Antibody_name != "CAB026035")
+results <- full_join(results, smp5)
+```
+
+## endocrineRes
+```{r}
+endocrineRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+endocrineLinReg <- endocrineRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+endocrineLinReg$data[[1]]
+
+endocrineLinReg <- endocrineRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+endocrineLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(endocrineLinReg$LinReg)) {
+  print(endocrineLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in endocrineRes
+```{r}
+endocrineLinReg
+
+# Significantly DE in parathyroid gland
+endocrineRes %>%
+  dplyr::filter(Gene_name %in% c("GSTK1", "LRP5", "MDH2"), Tissue_type_1 == "parathyroid+gland") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+endocrineRes %>%
+  dplyr::filter(Gene_name %in% c("GSTK1", "LRP5", "MDH2"), Tissue_type_1 == "parathyroid+gland", Antibody_name %!in% c("Antibody HPA019848", "Antibody HPA026720")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+# Significantly DE in thyroid gland
+endocrineRes %>%
+  dplyr::filter(Gene_name %in% c("ADAMTS13", "EMILIN1", "FN1", "NOXO1", "ZP3"), Tissue_type_1 == "thyroid+gland", Antibody_name != "HPA027066") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+endocrineRes %>%
+  dplyr::filter(Gene_name %in% c("ADAMTS13", "EMILIN1", "FN1", "NOXO1", "ZP3"), Tissue_type_1 == "thyroid+gland", Antibody_name != "HPA027066") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+#### Parathyroid gland
+##### GSTK1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "parathyroid+gland") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "parathyroid+gland", Gene_name == "GSTK1")
+
+# Linear regression and data visualization
+pgp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "parathyroid+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("GSTK1")
+
+pgp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "parathyroid+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("GSTK1")
+
+pgp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "parathyroid+gland") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("GSTK1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  pgp1, pgp2, pgp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/endocrineRes/parathyroid/GSTK1.tiff"), height = 7, width = 9)
+
+pgp1 <- endocrineRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "parathyroid+gland")
+results <- full_join(results, pgp1)
+```
+
+#### Thyroid gland
+##### ADAMTS13
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc14 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "thyroid+gland") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pwc14$Tissue <- "thyroid+gland"
+pwc14$Gene <- "ADAMTS13"
+pwc14 <- pwc14 %>%
+  relocate(Tissue, Gene, .before = ".y.")
+pairwiseComparison <- full_join(pairwiseComparison, pwc14)
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "thyroid+gland", Gene_name == "ADAMTS13")
+
+# Linear regression and data visualization
+tgp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "thyroid+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ADAMTS13")
+
+tgp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "thyroid+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ADAMTS13")
+
+tgp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "thyroid+gland") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ADAMTS13") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  tgp1, tgp2, tgp3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/endocrineRes/thyroid/ADAMTS13.tiff"), height = 7, width = 9)
+
+tgp1 <- endocrineRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "thyroid+gland")
+results <- full_join(results, tgp1)
+```
+
+##### EMILIN1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "EMILIN1", Tissue_type_1 == "thyroid+gland") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "thyroid+gland", Gene_name == "EMILIN1")
+
+# Linear regression and data visualization
+tgp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "EMILIN1", Tissue_type_1 == "thyroid+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EMILIN1")
+
+tgp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "EMILIN1", Tissue_type_1 == "thyroid+gland") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("EMILIN1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  tgp4, tgp5,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/endocrineRes/thyroid/EMILIN1.tiff"), height = 7, width = 9)
+
+tgp4 <- endocrineRes %>%
+  dplyr::filter(Gene_name == "EMILIN1", Tissue_type_1 == "thyroid+gland")
+results <- full_join(results, tgp4)
+```
+
+##### NOXO1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "NOXO1", Tissue_type_1 == "thyroid+gland") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "thyroid+gland", Gene_name == "NOXO1")
+
+# Linear regression and data visualization
+tgp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "NOXO1", Tissue_type_1 == "thyroid+gland") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("NOXO1")
+
+tgp7 <- finalRes %>%
+  dplyr::filter(Gene_name == "NOXO1", Tissue_type_1 == "thyroid+gland") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("NOXO1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  tgp6, tgp7,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/endocrineRes/thyroid/NOXO1.tiff"), height = 7, width = 9)
+
+tgp6 <- endocrineRes %>%
+  dplyr::filter(Gene_name == "NOXO1", Tissue_type_1 == "thyroid+gland")
+results <- full_join(results, tgp6)
+```
+
+## metabolicRes
+```{r}
+metabolicRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+metabolicLinReg <- metabolicRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+metabolicLinReg$data[[1]]
+
+metabolicLinReg <- metabolicRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+metabolicLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(metabolicLinReg$LinReg)) {
+  print(metabolicLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in metabolicRes
+```{r}
+metabolicLinReg
+
+# Significantly DE in liver
+metabolicRes %>%
+  dplyr::filter(Gene_name %in% c("ADAMTS13", "ALDH6A1", "MMP9"), Tissue_type_1 == "liver") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+metabolicRes %>%
+  dplyr::filter(Gene_name %in% c("ADAMTS13", "ALDH6A1", "MMP9"), Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "Antibody HPA029074", "HPA001238")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94) 
+
+# Significantly DE in spleen
+metabolicRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COASY", "MMP9"), Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+metabolicRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COASY", "MMP9"), Tissue_type_1 == "spleen", Antibody_name %!in% c("CAB000348", "Antibody HPA029072", "Antibody HPA022912", "CAB068200", "HPA063909")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+#### Liver
+##### ADAMTS13
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "liver") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+# my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "liver", Gene_name == "ADAMTS13")
+
+# Linear regression and data visualization
+lip1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "liver") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.60, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ADAMTS13")
+
+lip2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "liver") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ADAMTS13") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  lip1, lip2,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/metabolicRes/liver/ADAMTS13.tiff"), height = 7, width = 9)
+
+lip1 <- metabolicRes %>%
+  dplyr::filter(Gene_name == "ADAMTS13", Tissue_type_1 == "liver")
+results <- full_join(results, lip1)
+```
+
+##### ALDH6A1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "liver") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc1)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+# my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "liver", Gene_name == "ALDH6A1")
+
+# Linear regression and data visualization
+lip3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "liver") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.24, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+lip4 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "liver") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.24, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+lip5 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "liver") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  lip3, lip4, lip5, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/metabolicRes/liver/ALDH6A1.tiff"), height = 7, width = 9)
+
+lip3 <- metabolicRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "liver")
+results <- full_join(results, lip3)
+```
+
+##### MMP9
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc5 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc5)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "MMP9")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow", "urinary+bladder", "liver")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+# my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "liver", Gene_name == "MMP9")
+
+# Linear regression and data visualization
+lip5 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+lip6 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+lip7 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MMP9") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  lip5, lip6, lip7, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/metabolicRes/liver/MMP9.tiff"), height = 7, width = 9)
+
+lip5 <- metabolicRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238"))
+results <- full_join(results, lip5)
+```
+
+#### Spleen
+##### ALDH6A1
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "spleen") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc2)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen")
+
+my_comparisons <- list(c("< 40", "≥ 60"))
+# my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "spleen", Gene_name == "ALDH6A1")
+
+# Linear regression and data visualization
+sp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.25, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+sp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.30, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+sp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  sp1, sp2, sp3, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/metabolicRes/spleen/ALDH6A1.tiff"), height = 7, width = 9)
+
+sp1 <- metabolicRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "spleen")
+results <- full_join(results, sp1)
+```
+
+##### COASY
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc15 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "spleen") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pwc15$Tissue <- "spleen"
+pwc15$Gene <- "COASY"
+pwc15 <- pwc15 %>%
+  relocate(Tissue, Gene, .before = ".y.")
+pairwiseComparison <- full_join(pairwiseComparison, pwc15)
+
+my_comparisons <- list(c("< 40", "≥ 60"))
+# my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "spleen", Gene_name == "COASY")
+
+# Linear regression and data visualization
+sp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.20, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COASY")
+
+sp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.20, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COASY")
+
+sp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("COASY") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  sp3, sp4, sp5, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/metabolicRes/spleen/COASY.tiff"), height = 7, width = 9)
+
+sp3 <- metabolicRes %>%
+  dplyr::filter(Gene_name == "COASY", Tissue_type_1 == "spleen")
+results <- full_join(results, sp3)
+```
+
+##### MMP9
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc6 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc6)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "MMP9", "MMP9")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow", "urinary+bladder", "liver", "spleen")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "spleen", Gene_name == "MMP9")
+
+finalRes %>%
+  dplyr::filter(Tissue_type_1 == "spleen", Gene_name == "MMP9") %>%
+  cor_test(Intensity, Age, method = "spearman")
+
+# Linear regression and data visualization
+sp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+sp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+sp7 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MMP9") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  sp5, sp6, sp7, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  ) 
+
+ggsave(here("output/metabolicRes/spleen/MMP9.tiff"), height = 7, width = 9)
+
+sp5 <- metabolicRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen", Antibody_name %!in% c("CAB068200", "HPA063909", "CAB000348"))
+results <- full_join(results, sp5)
+```
+
+
+## adiposeRes
+```{r}
+adiposeRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+adiposeLinReg <- adiposeRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+adiposeLinReg$data[[1]]
+
+adiposeLinReg <- adiposeRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+adiposeLinReg$LinReg[[1]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(adiposeLinReg$LinReg)) {
+  print(adiposeLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in adiposeRes
+```{r}
+adiposeLinReg
+
+# Significantly DE in adipose tissue
+adiposeRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COL6A1", "COL8A1", "NOXO1", "SDC2", "SOST"), Tissue_type_1 == "adipose+tissue") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+adiposeRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COL6A1", "NOXO1", "SDC2", "SOST"), Tissue_type_1 == "adipose+tissue", Antibody_name %!in% c("Antibody HPA029072", "Antibody HPA029073", "HPA019142")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94) 
+
+# Significantly DE in soft tissue
+adiposeRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COL6A1", "COL8A1", "NOXO1", "PRKCZ", "RXFP1", "SDC2", "SOST"), Tissue_type_1 == "soft+tissue", Antibody_name %!in% c("Antibody HPA029072", "Antibody HPA029073", "HPA019142")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) +
+  scale_x_discrete(limits = level_order)
+
+adiposeRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COL6A1", "COL8A1", "NOXO1", "PRKCZ", "RXFP1", "SDC2", "SOST"), Tissue_type_1 == "soft+tissue", Antibody_name %!in% c("Antibody HPA029072", "Antibody HPA029073", "HPA019142")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94) 
+```
+
+#### Adipose tissue
+##### ALDH6A1
+```{r}
+ap1 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "adipose+tissue", Antibody_name != "HPA029073") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.06) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+ap2 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "adipose+tissue", Antibody_name != "HPA029073") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age")
+
+ggarrange(
+  ap1, ap2,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/adiposeRes/adipose/ALDH6A1.tiff"), height = 7, width = 9)
+```
+
+##### COL6A1
+```{r}
+ap3 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "COL6A1", Tissue_type_1 == "adipose+tissue", Antibody_name != "HPA019142") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COL6A1")
+
+ap4 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "COL6A1", Tissue_type_1 == "adipose+tissue", Antibody_name != "HPA019142") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("COL6A1") + xlab("Age")
+
+ggarrange(
+  ap3, ap4,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/adiposeRes/adipose/COL6A1.tiff"), height = 7, width = 9)
+```
+
+##### COL8A1
+```{r}
+ap5 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "adipose+tissue") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COL8A1")
+
+ap6 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "adipose+tissue") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("COL8A1") + xlab("Age")
+
+ggarrange(
+  ap5, ap6,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/adiposeRes/adipose/COL8A1.tiff"), height = 7, width = 9)
+```
+
+##### NOXO1
+```{r}
+ap7 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "NOXO1", Tissue_type_1 == "adipose+tissue") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("NOXO1")
+
+ap8 <- adiposeRes %>%
+  dplyr::filter(Gene_name == "NOXO1", Tissue_type_1 == "adipose+tissue") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("NOXO1") + xlab("Age")
+
+ggarrange(
+  ap7, ap8,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/adiposeRes/adipose/NOXO1.tiff"), height = 7, width = 9)
+
+# Unable to properly analyse the data and compare between the images as the image samples from different patients originate from multiple different tissues and some of them don't even have 'adipose/soft tissue' mentioned
+```
+
+
+## boneRes
+```{r}
+boneRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+boneLinReg <- boneRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+boneLinReg$data[[1]]
+
+boneLinReg <- boneRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+boneLinReg$LinReg[[53]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(boneLinReg$LinReg)) {
+  print(boneLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in boneRes
+```{r}
+boneLinReg
+
+# Significantly DE in bone marrow
+boneRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COL6A1", "COL8A1", "EPDR1", "FREM3", "NOXO1"), Tissue_type_1 == "bone+marrow", Antibody_name %!in% c("Antibody HPA029072", "Antibody HPA029075", "CAB034423")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94) 
+```
+
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+pwc3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "bone+marrow", Antibody_name != "HPA029072") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc3)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "bone+marrow", Gene_name == "ALDH6A1")
+
+# Linear regression and data visualization
+bop1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "bone+marrow", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+bop2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "bone+marrow", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+bop3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "bone+marrow", Antibody_name != "HPA029072") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  bop1, bop2, bop3, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/boneRes/bone_marrow/ALDH6A1.tiff"), height = 7, width = 9)
+
+bop1 <- boneRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "bone+marrow", Antibody_name != "HPA029072")
+results <- full_join(results, bop1)
+```
+
+```{r}
+# The code is not presented in a linear fashion and the above data was subject to more filtering below. The tests and visualizations performed in this chunk are performed on the final, filtered data. 
+
+# Pairwise comparison between the age groups
+finalRes %>%
+  dplyr::filter(Gene_name == "COL6A1", Tissue_type_1 == "bone+marrow") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "bone+marrow", Gene_name == "COL6A1")
+
+# Linear regression and data visualization
+bop3 <- finalRes %>%
+  dplyr::filter(Gene_name == "COL6A1", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COL6A1")
+
+bop4 <- finalRes %>%
+  dplyr::filter(Gene_name == "COL6A1", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COL6A1")
+
+bop5 <- finalRes %>%
+  dplyr::filter(Gene_name == "COL6A1", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("COL6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  bop3, bop4, bop5, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/boneRes/bone_marrow/COL6A1.tiff"), height = 7, width = 9)
+
+bop3 <- boneRes %>%
+  dplyr::filter(Gene_name == "COL6A1", Tissue_type_1 == "bone+marrow")
+results <- full_join(results, bop3)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "bone+marrow") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "bone+marrow", Gene_name == "COL8A1")
+
+# Linear regression and data visualization
+bop5 <- finalRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COL8A1")
+
+bop6 <- finalRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("COL8A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  bop5, bop6,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/boneRes/bone_marrow/COL8A1.tiff"), height = 7, width = 9)
+
+bop5 <- boneRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "bone+marrow")
+results <- full_join(results, bop5)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "EPDR1", Tissue_type_1 == "bone+marrow") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "bone+marrow", Gene_name == "EPDR1")
+
+# Linear regression and data visualization
+bop7 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPDR1", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("EPDR1")
+
+bop8 <- finalRes %>%
+  dplyr::filter(Gene_name == "EPDR1", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("EPDR1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  bop7, bop8,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/boneRes/bone_marrow/EPDR1.tiff"), height = 7, width = 9)
+
+bop7 <- boneRes %>%
+  dplyr::filter(Gene_name == "EPDR1", Tissue_type_1 == "bone+marrow")
+results <- full_join(results, bop7)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "bone+marrow") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "bone+marrow", Gene_name == "FREM3")
+
+# Linear regression and data visualization
+bop9 <- finalRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("FREM3")
+
+bop10 <- finalRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "bone+marrow") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("FREM3") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  bop9, bop10,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/boneRes/bone_marrow/FREM3.tiff"), height = 7, width = 9)
+
+bop9 <- boneRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "bone+marrow")
+results <- full_join(results, bop9)
+```
+
+## breastRes
+```{r}
+breastRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+breastLinReg <- breastRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+breastLinReg$data[[1]]
+
+breastLinReg <- breastRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+breastLinReg$LinReg[[53]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(breastLinReg$LinReg)) {
+  print(breastLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in breastRes
+```{r}
+breastLinReg
+
+breastRes %>%
+  dplyr::filter(Gene_name %in% c("DECR1", "GSTK1", "HDGF", "HPR", "MDH2", "PRKCZ", "TPSAB1"), Tissue_type_1 == "breast", Antibody_name %!in% c("Antibody HPA023160", "Antibody HPA041690", "Antibody HPA029072", "Antibody HPA022904", "Antibody HPA043041", "CAB026035", "Antibody HPA026720", "Antibody HPA019714", "CAB022175")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94) 
+# ABAT and MDH2 have to be coloured by antibodies
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "DECR1", Tissue_type_1 == "breast") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "breast", Gene_name == "DECR1")
+
+# Linear regression and data visualization
+brp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "DECR1", Tissue_type_1 == "breast", Antibody_name != "HPA041690") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("DECR1")
+
+brp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "DECR1", Tissue_type_1 == "breast", Antibody_name != "HPA041690") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("DECR1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  brp1, brp2,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/breastRes/breast/DECR1.tiff"), height = 7, width = 9)
+
+brp1 <- breastRes %>%
+  dplyr::filter(Gene_name == "DECR1", Tissue_type_1 == "breast", Antibody_name != "HPA041690")
+results <- full_join(results, brp1)
+```
+
+```{r}
+pwc10 <- finalRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "breast", Antibody_name != "CAB026035") %>%
+  unique() %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pwc10$Tissue <- "breast"
+pwc10$Gene <- "HDGF"
+pwc10 <- pwc10 %>%
+  relocate(Tissue, Gene, .before = ".y.")
+pairwiseComparison <- full_join(pairwiseComparison, pwc10)
+#pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "ITGAM")
+#pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow", "urinary+bladder", "liver", "spleen", "skin", "skin", "skin", "urinary+bladder", "urinary+bladder", "urinary+bladder", "heart+muscle")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Tissue_type_1 == "breast", Gene_name == "HDGF")
+
+finalRes %>%
+  dplyr::filter(Tissue_type_1 == "breast", Gene_name == "HDGF") %>%
+  correlation::cor_test(x = "Age", y = "Intensity", method = "spearman")
+  
+# Linear regression and data visualization
+brp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "breast", Antibody_name != "CAB026035") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("HDGF")
+
+brp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "breast", Antibody_name != "CAB026035") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.48, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("HDGF")
+
+brp7 <- finalRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "breast", Antibody_name != "CAB026035") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("HDGF") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  brp5, brp6, brp7, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/breastRes/breast/HDGF.tiff"), height = 7, width = 9)
+
+brp5 <- breastRes %>%
+  dplyr::filter(Gene_name == "HDGF", Tissue_type_1 == "breast", Antibody_name != "CAB026035")
+results <- full_join(results, brp5)
+```
+
+```{r}
+breastRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "breast") %>%
+  unique() %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+breastRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "breast") %>%
+  unique() %>%
+  cor_test(Intensity, Age, method = "spearman")
+
+# Linear regression and data visualization
+brp7 <- breastRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "breast") %>%
+  unique() %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("HPR")
+
+brp8 <- breastRes %>%
+  dplyr::filter(Gene_name == "HPR", Tissue_type_1 == "breast") %>%
+  unique() %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("HPR") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  brp7, brp8,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/breastRes/breast/HPR.tiff"), height = 7, width = 9)
+```
+
+```{r}
+brp9 <- breastRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "breast", Antibody_name != "HPA026720") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.08) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MDH2")
+
+brp10 <- breastRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "breast", Antibody_name != "HPA026720") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MDH2") + xlab("Age")
+
+ggarrange(
+  brp9, brp10,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/breastRes/breast/MDH2.tiff"), height = 7, width = 9)
+```
+
+```{r}
+brp9 <- breastRes %>%
+  dplyr::filter(Gene_name == "PRKCZ", Tissue_type_1 == "breast") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("PRKCZ")
+
+brp10 <- breastRes %>%
+  dplyr::filter(Gene_name == "PRKCZ", Tissue_type_1 == "breast", Antibody_name != "HPA026720") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("PRKCZ") + xlab("Age")
+
+ggarrange(
+  brp9, brp10,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/breastRes/breast/PRKCZ.tiff"), height = 7, width = 9)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "TPSAB1", Tissue_type_1 == "breast", Antibody_name != "CAB022175") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "TPSAB1", Tissue_type_1 == "breast")
+
+# Linear regression and data visualization
+brp11 <- finalRes %>%
+  dplyr::filter(Gene_name == "TPSAB1", Tissue_type_1 == "breast", Antibody_name != "CAB022175") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.24, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("TPSAB1")
+
+brp12 <- finalRes %>%
+  dplyr::filter(Gene_name == "TPSAB1", Tissue_type_1 == "breast", Antibody_name != "CAB022175") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.24, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("TPSAB1")
+
+brp13 <- finalRes %>%
+  dplyr::filter(Gene_name == "TPSAB1", Tissue_type_1 == "breast", Antibody_name != "CAB022175") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("TPSAB1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  brp11, brp12, brp13, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/breastRes/breast/TPSAB1.tiff"), height = 7, width = 9)
+
+brp11 <- breastRes %>%
+  dplyr::filter(Gene_name == "TPSAB1", Tissue_type_1 == "breast", Antibody_name != "CAB022175")
+results <- full_join(results, brp11) 
+```
+
+## skinRes
+```{r}
+skinRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+skinLinReg <- skinRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+skinLinReg$data[[1]]
+
+skinLinReg <- skinRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+skinLinReg$LinReg[[53]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(skinLinReg$LinReg)) {
+  print(skinLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in skinRes
+```{r}
+skinLinReg
+
+skinRes %>%
+  dplyr::filter(Gene_name %in% c("CTSG", "MDH2", "MMP9", "NAV2"), Tissue_type_1 == "skin", Antibody_name %!in% c("Antibody HPA029072", "Antibody HPA029075", "HPA002549", "CAB068252", "CAB068251", "CAB068250", "Antibody HPA043041", "CAB000110", "CAB026035", "HPA048728", "Antibody HPA019848", "Antibody HPA019714", "Antibody HPA019716", "Antibody HPA047750", "CAB000348", "CAB068199", "CAB068200", "HPA001238", "Antibody HPA011891", "HPA060933")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "CTSG", Tissue_type_1 == "skin", Antibody_name != "CAB000110") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "CTSG", Tissue_type_1 == "skin")
+
+# Linear regression and data visualization
+skp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "CTSG", Tissue_type_1 == "skin", Antibody_name != "CAB000110") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("CTSG")
+
+skp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "CTSG", Tissue_type_1 == "skin", Antibody_name != "CAB000110") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("CTSG") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  skp1, skp2,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/skinRes/skin/CTSG.tiff"), height = 7, width = 9)
+
+skp1 <- skinRes %>%
+  dplyr::filter(Gene_name == "CTSG", Tissue_type_1 == "skin", Antibody_name != "CAB000110")
+results <- full_join(results, skp1)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "skin", Antibody_name != "CAB000110") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "skin")
+
+# Linear regression and data visualization
+skp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "skin", Antibody_name == "HPA026720") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MDH2")
+
+skp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "skin", Antibody_name == "HPA026720") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MDH2") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  skp3, skp4,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/skinRes/skin/MDH2.tiff"), height = 7, width = 9)
+
+skp3 <- skinRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "skin", Antibody_name == "HPA026720")
+results <- full_join(results, skp3)
+```
+
+```{r}
+pwc7 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc7)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow", "urinary+bladder", "liver", "spleen", "skin", "skin", "skin")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin")
+
+# Linear regression and data visualization
+skp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+skp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+skp7 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MMP9") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  skp5, skp6, skp7, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/skinRes/skin/MMP9.tiff"), height = 7, width = 9)
+
+skp5 <- skinRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200"))
+results <- full_join(results, skp5)
+```
+
+```{r}
+skp7 <- skinRes %>%
+  dplyr::filter(Gene_name == "NAV2", Tissue_type_1 == "skin", Antibody_name != "HPA011891") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10) + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("NAV2")
+
+skp8 <- skinRes %>%
+  dplyr::filter(Gene_name == "NAV2", Tissue_type_1 == "skin", Antibody_name != "HPA011891") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("NAV2") + xlab("Age")
+
+ggarrange(
+  skp7, skp8,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/skinRes/skin/NAV2.tiff"), height = 7, width = 9)
+```
+
+
+## tonsilRes
+```{r}
+tonsilRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+tonsilLinReg <- tonsilRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+tonsilLinReg$data[[1]]
+
+tonsilLinReg <- tonsilRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+tonsilLinReg$LinReg[[53]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(tonsilLinReg$LinReg)) {
+  print(tonsilLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in tonsilRes
+```{r}
+tonsilLinReg
+
+tonsilRes %>%
+  dplyr::filter(Gene_name %in% c("C4BPA", "F13A1", "FN1", "FREM3"), Tissue_type_1 == "tonsil", Antibody_name %!in% c("Antibody CAB002155", "HPA027066", "Antibody HPA029912", "Antibody HPA029518")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "C4BPA", Tissue_type_1 == "tonsil") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "C4BPA", Tissue_type_1 == "tonsil")
+
+# Linear regression and data visualization
+top1 <- finalRes %>%
+  dplyr::filter(Gene_name == "C4BPA", Tissue_type_1 == "tonsil") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("C4BPA")
+
+top2 <- finalRes %>%
+  dplyr::filter(Gene_name == "C4BPA", Tissue_type_1 == "tonsil") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("C4BPA")
+
+top3 <- finalRes %>%
+  dplyr::filter(Gene_name == "C4BPA", Tissue_type_1 == "tonsil") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("C4BPA") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  top1, top2, top3,
+  common.legend = FALSE, legend = "top", nrow = 1
+  )
+
+ggsave(here("output/tonsilRes/tonsil/C4BPA.tiff"), height = 7, width = 9)
+
+top1 <- tonsilRes %>%
+  dplyr::filter(Gene_name == "C4BPA", Tissue_type_1 == "tonsil")
+results <- full_join(results, top1)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "tonsil", Antibody_name != "CAB002155") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "tonsil")
+
+# Linear regression and data visualization
+top4 <- finalRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "tonsil", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("F13A1")
+
+top5 <- finalRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "tonsil", Antibody_name != "CAB002155") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("F13A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  top4, top5, 
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/tonsilRes/tonsil/F13A1.tiff"), height = 7, width = 9)
+
+top4 <- tonsilRes %>%
+  dplyr::filter(Gene_name == "F13A1", Tissue_type_1 == "tonsil", Antibody_name != "CAB002155")
+results <- full_join(results, top4)
+```
+
+```{r}
+tonsilRes$Age2 <- tonsilRes$Age
+
+tonsilRes <- tonsilRes %>%
+  mutate(Age2 = case_when(
+    Age2 == "6" ~ "< 40",
+    Age2 < "40" ~ "< 40", # young
+    Age2 >= "40" & Age2 < "60" ~ "40-60", # middle-aged
+    Age2 >= "60" ~ "≥ 60" # elderly
+  ))
+
+tonsilRes %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Age, Age2, Intensity) %>%
+  dplyr::filter(Gene_name == "FN1", Tissue_type_1 == "tonsil", Antibody_name != "HPA027066") %>%
+  unique() %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+tonsilRes %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Age, Age2, Intensity) %>%
+  dplyr::filter(Gene_name == "FN1", Tissue_type_1 == "tonsil", Antibody_name != "HPA027066") %>%
+  unique() %>%
+  cor_test(Intensity, Age, method = "spearman")
+
+# Linear regression and data visualization
+
+top6 <- tonsilRes %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Age, Age2, Intensity) %>%
+  dplyr::filter(Gene_name == "FN1", Tissue_type_1 == "tonsil", Antibody_name != "HPA027066") %>%
+  unique() %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("FN1")
+
+top7 <- tonsilRes %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Age, Age2, Intensity) %>%
+  dplyr::filter(Gene_name == "FN1", Tissue_type_1 == "tonsil", Antibody_name != "HPA027066") %>%
+  unique() %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("FN1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  top6, top7, 
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/tonsilRes/tonsil/FN1.tiff"), height = 7, width = 9)
+
+top6 <- tonsilRes %>%
+  dplyr::filter(Gene_name == "FN1", Antibody_name != "HPA027066")
+results <- full_join(results, top6)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "tonsil") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "tonsil")
+
+# Linear regression and data visualization
+top8 <- finalRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "tonsil") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("FREM3")
+
+top9 <- finalRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "tonsil") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("FREM3") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  top8, top9,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/tonsilRes/tonsil/FREM3.tiff"), height = 7, width = 9)
+
+top8 <- tonsilRes %>%
+  dplyr::filter(Gene_name == "FREM3", Tissue_type_1 == "tonsil")
+results <- full_join(results, top8)
+```
+
+## bladderRes
+```{r}
+bladderRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+
+# Automated linear regression plots
+bladderLinReg <- bladderRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+bladderLinReg$data[[1]]
+
+bladderLinReg <- bladderRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+bladderLinReg$LinReg[[53]]
+
+# Loop to display all the linear regression plots at once
+for (a in seq_along(bladderLinReg$LinReg)) {
+  print(bladderLinReg$LinReg[[a]])
+}
+```
+
+### Significantly DE proteins in bladderRes
+```{r}
+bladderLinReg
+
+bladderRes %>%
+  dplyr::filter(Gene_name %in% c("ALDH6A1", "COL8A1", "GSTK1", "MMP9"), Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("Antibody HPA022904", "Antibody HPA029072", "HPA063909", "CAB068199")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94) 
+```
+
+```{r}
+# Pairwise comparison
+pwc4 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "urinary+bladder") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc4)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow", "urinary+bladder")
+
+my_comparisons <- list(c("40-60", "≥ 60"))
+#my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "urinary+bladder")
+
+# Linear regression and data visualization
+blp1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "urinary+bladder") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.96, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+blp2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "urinary+bladder") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.96, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("ALDH6A1")
+
+blp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "urinary+bladder") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("ALDH6A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  blp1, blp2, blp3, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/bladderRes/bladder/ALDH6A1.tiff"), height = 7, width = 9)
+
+blp1 <- bladderRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "urinary+bladder")
+results <- full_join(results, blp1)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "urinary+bladder") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "urinary+bladder")
+
+# Linear regression and data visualization
+blp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "urinary+bladder") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.96, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("COL8A1")
+
+blp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "urinary+bladder") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("COL8A1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  blp3, blp4,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/bladderRes/bladder/COL8A1.tiff"), height = 7, width = 9)
+
+blp3 <- bladderRes %>%
+  dplyr::filter(Gene_name == "COL8A1", Tissue_type_1 == "urinary+bladder")
+results <- full_join(results, blp3)
+```
+
+```{r}
+finalRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "urinary+bladder", Antibody_name != "HPA022904") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "urinary+bladder")
+
+# Linear regression and data visualization
+blp5 <- finalRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "urinary+bladder", Antibody_name != "HPA022904") %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.10, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("GSTK1")
+
+blp6 <- finalRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "urinary+bladder", Antibody_name != "HPA022904") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("GSTK1") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  blp5, blp6,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/bladderRes/bladder/GSTK1.tiff"), height = 7, width = 9)
+
+blp5 <- bladderRes %>%
+  dplyr::filter(Gene_name == "GSTK1", Tissue_type_1 == "urinary+bladder", Antibody_name != "HPA022904")
+results <- full_join(results, blp5)
+```
+
+```{r}
+pwc8 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("HPA063909", "CAB068199")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+pairwiseComparison <- full_join(pairwiseComparison, pwc8)
+pairwiseComparison$Gene <- c("ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "ALDH6A1", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9", "MMP9")
+pairwiseComparison$Tissue <- c("cervix%2C+uterine", "skeletal+muscle", "liver", "spleen", "bone+marrow", "urinary+bladder", "liver", "spleen", "skin", "skin", "skin", "urinary+bladder", "urinary+bladder", "urinary+bladder")
+
+my_comparisons <- list(c("< 40", "40-60"), c("< 40", "≥ 60"), c("40-60", "≥ 60"))
+
+corr %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder")
+
+# Linear regression and data visualization
+blp7 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("HPA063909", "CAB068199")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.14, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+blp8 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("HPA063909", "CAB068199")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + guides(color = guide_legend(nrow = 2)) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.14, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MMP9")
+
+blp9 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("HPA063909", "CAB068199")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) +
+  ggtitle("MMP9") + xlab("Age") + stat_compare_means(comparisons = my_comparisons)
+
+ggarrange(
+  blp7, blp8, blp9, nrow = 1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/bladderRes/bladder/MMP9.tiff"), height = 7, width = 9)
+
+blp7 <- bladderRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("HPA063909", "CAB068199"))
+results <- full_join(results, blp7)
+```
+
+# Results
+```{r}
+results
+
+finalRes <- results %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD) %>%
+  unique()
+```
+
+```{r}
+# Correlation testing to validate the results
+testCorrelation <- function(x) {
+    x %>%
+    rstatix::cor_test(Intensity, Age, method = "spearman")
+}
+
+corr <- finalRes %>%
+  group_by(Tissue_type_1, Gene_name) %>%
+  nest() %>%
+  mutate(Correlation = map(data, testCorrelation))
+
+corr$data[[1]]
+corr$Correlation[[1]]
+
+# Unnest the data frames
+corr <- corr %>%
+  unnest(Correlation)
+
+# Filter and export the significant samples
+corrExport <- corr %>%
+  dplyr::filter(p < 0.05) %>%
+  arrange(p) %>%
+  select(-data)
+
+write.xlsx(corrExport, file = "correlations.xlsx")
+```
+
+```{r}
+# Pairwise comparison export
+pairwiseComparisonExp <- pairwiseComparison %>%
+  arrange(p) %>%
+  select(-c(p.adj, p.format, p.signif))
+
+write.xlsx(pairwiseComparisonExp, file = "pairwiseComparisons.xlsx")
+```
+
+```{r}
+# Transformation and correlation on transformed data
+finalRes <- finalRes %>%
+  mutate(logInt = log(Intensity)) %>% # log computes ln (natural logarithm) ## the best
+  mutate(inverseInt = 1/(Intensity)) %>% # inverse (1/x) transformation 
+  mutate(sqrtInt = sqrt(Intensity)) %>% # square root transformation
+  mutate(expInt = exp(logInt)) # transforms the logInt back to the original Intensity values
+
+# Visual comparison between the data distribution and normality
+# Untransformed data
+tsf1 <- finalRes %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Intensity distribution") + ylab("Density") 
+# non-parametric, positively skewed and long-tailed
+
+# ln-transformed data
+tsf2 <- finalRes %>%
+  ggplot() + aes(x = logInt, colour = Age2) + geom_density() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Intensity distribution") + ylab("Density") + xlab("ln(Intensity)")
+
+# inverse transformed
+tsf3 <- finalRes %>%
+  ggplot() + aes(x = inverseInt, colour = Age2) + geom_density() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Intensity distribution") + ylab("Density") + xlab("1/(Intensity)")
+
+# square-root transformation
+tsf4 <- finalRes %>%
+  ggplot() + aes(x = sqrtInt, colour = Age2) + geom_density() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Intensity distribution") + ylab("Density") + xlab("√(Intensity)")
+
+# Untransformed data  
+tsf5 <- finalRes %>%
+  ggplot() + aes(sample = Intensity) + geom_qq() + geom_qq_line() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Q-Q plot of intensities") + 
+  ylab("Sample quantiles") + xlab("Theoretical quantiles")
+
+# ln-transformed data
+tsf6 <- finalRes %>%
+  ggplot() + aes(sample = logInt) + geom_qq() + geom_qq_line() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Q-Q plot of intensities") + 
+  ylab("ln(Quantiles)") + xlab("Theoretical quantiles")
+
+# inverse transformed
+tsf7 <- finalRes %>%
+  ggplot() + aes(sample = inverseInt) + geom_qq() + geom_qq_line() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Q-Q plot of intensities") + 
+  ylab("1/(Quantiles)") + xlab("Theoretical quantiles")
+
+# square root transformed
+tsf8 <- finalRes %>%
+  ggplot() + aes(sample = sqrtInt) + geom_qq() + geom_qq_line() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Q-Q plot of intensities") + 
+  ylab("√(Quantiles)") + xlab("Theoretical quantiles")
+
+
+ggarrange(
+  tsf1, tsf2, tsf3, tsf4, nrow = 2, ncol = 2,
+  common.legend = TRUE, legend = "bottom"
+  )
+
+ggarrange(
+  tsf5, tsf6, tsf7, tsf8, nrow = 2, ncol = 2,
+  common.legend = TRUE, legend = "right"
+  )
+
+ggsave(here("output/transformed_normality_comparison_ggarranged2.tiff"), height = 4.5, width = 9)
+
+# Visualization of the ln-transformed variable
+lp3 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age, y = logInt, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.25, method = "pearson") +
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MDH2") + guides(color = guide_legend(nrow = 2)) + ylab("ln(Intensity)")
+
+lp4 <- finalRes %>%
+  dplyr::filter(Gene_name == "MDH2", Tissue_type_1 == "lung") %>%
+  ggplot() + aes(x = Age, y = logInt, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.25, method = "spearman") +
+  scale_colour_npg() + scale_fill_npg() + ggtitle("MDH2") + guides(color = guide_legend(nrow = 2)) + ylab("ln(Intensity)")
+
+ggarrange(
+  lp3, lp4,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/respiratoryRes/lung/MDH2_logTransformed_comparison.tiff"))
+```
+
+```{r}
+# How many tissues is each of these genes differentially expressed in?
+finalRes %>%
+  count(Tissue_type_1) %>% # already grouped by Gene_name, shows the amount of entries for each Tissue_type_1
+  count(Gene_name) %>% # counts the number of Gene_names, which is the number of Tissue_types the Gene_name has entries in
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = n, colour = "#E64B35", fill = "#E64B35") + geom_bar() + 
+  scale_colour_npg() + scale_fill_npg() + theme(panel.grid = element_line(colour = "gray97"), legend.position = "none") + 
+  scale_x_continuous(breaks = seq(1, 7, by = 1)) + 
+  ggtitle("DE proteins across tissue types") + xlab("Number of tissue types with DE") + 
+  ylab("Number of proteins expressed") + scale_y_continuous(breaks = seq(1, 15, by = 3)) +
+  annotate("text", x=7, y=1.25, label= "ALDH6A1", size = 3.25) + annotate("text", x=5, y=1.25, label= "EPYC", size = 3.25) +
+  annotate("text", x=4, y=1.25, label= "MMP9", size = 3.25) + annotate("text", x=3, y=1.25, label= "MDH2", size = 3.25)
+
+ggsave(here("output/NofDEProteinsAcrossTissues1.tiff"), width = 7, height = 7)
+
+# ALDH6A1 7, EPYC 5, MMP9 4, MDH2 3
+
+finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1") %>%
+  count(Tissue_type_1)
+
+# Which tissue has the greatest amount of age-altered genes?
+finalRes %>%
+  group_by(Tissue_type_1) %>%
+  count(Gene_name) %>%
+  count(Tissue_type_1) %>%
+  arrange(desc(n)) %>%
+  ggplot() + aes(x = n, colour = "#E64B35", fill = "#E64B35") + geom_bar() + scale_colour_npg() + scale_fill_npg() +
+  theme(panel.grid = element_line(colour = "gray97"), legend.position = "none") + ggtitle("Tissues with age-altered genes") +
+  xlab("Number of genes DE") + ylab("Number of tissues") + 
+  annotate("text", x=5, y=0.5, label= "Bone marrow", size = 3.25, colour = "white") +
+  annotate("text", x=4, y=1.75, label= "Urinary bladder", size = 3.25, colour = "white") + 
+  annotate("text", x=4, y=1.5, label= "Endometrium", size = 3.25, colour = "white") + 
+  annotate("text", x=4, y=1.25, label= "Tonsil", size = 3.25, colour = "white") + 
+  annotate("text", x=3, y=4.25, label= "Skeletal muscle", size = 3.25, colour = "white") +
+  annotate("text", x=3, y=4, label= "Thyroid gland", size = 3.25, colour = "white") + 
+  annotate("text", x=3, y=3.75, label= "Breast", size = 3.25, colour = "white") +
+  annotate("text", x=3, y=3.5, label= "Spleen", size = 3.25, colour = "white") +
+  annotate("text", x=3, y=3.25, label= "Lung", size = 3.25, colour = "white") +
+  annotate("text", x=3, y=3, label= "Liver", size = 3.25, colour = "white") +
+  annotate("text", x=2, y=1.25, label= "Heart muscle", size = 3.25, colour = "white") + 
+  annotate("text", x=2, y=1, label= "Gallbladder", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=5.75, label= "Parathyroid gland", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=5.5, label= "Cervix and uterus", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=5.25, label= "Seminal vesicle", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=5, label= "Salivary gland", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=4.75, label= "Duodenum", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=4.5, label= "Bronchus", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=4.25, label= "Pancreas", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=4, label= "Prostate", size = 3.25, colour = "white") +
+  annotate("text", x=1, y=3.75, label= "Testis", size = 3.25, colour = "white")
+  
+ggsave(here("output/age-alteredTissues.tiff"))
+```
+
+## DE proteins
+```{r}
+finalRes %>%
+  count(Tissue_type_1) %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+```
+
+```{r}
+# ALDH6A1
+finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "cervix%2C+uterine") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+my_comparisons <- list(c("40-60", "< 40"))
+finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "skeletal+muscle") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 == "spleen") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+my_comparisons1 <- list(c("< 40", "≥ 60"))
+
+cup1 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 %in% c("cervix%2C+uterine", "skeletal+muscle", "spleen")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "cervix%2C+uterine" ~ "Cervix and uterus",
+    Tissue_type_1 == "skeletal+muscle" ~ "Skeletal muscle",
+    Tissue_type_1 == "spleen" ~ "Spleen")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.94, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + facet_wrap(~Tissue_type_1)
+
+cup2 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 %in% c("cervix%2C+uterine", "skeletal+muscle", "spleen")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "cervix%2C+uterine" ~ "Cervix and uterus",
+    Tissue_type_1 == "skeletal+muscle" ~ "Skeletal muscle",
+    Tissue_type_1 == "spleen" ~ "Spleen")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  scale_colour_npg() + scale_fill_npg() + facet_wrap(~Tissue_type_1)
+
+cup3 <- finalRes %>%
+  dplyr::filter(Gene_name == "ALDH6A1", Tissue_type_1 %in% c("cervix%2C+uterine", "skeletal+muscle", "spleen")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "cervix%2C+uterine" ~ "Cervix and uterus",
+    Tissue_type_1 == "skeletal+muscle" ~ "Skeletal muscle",
+    Tissue_type_1 == "spleen" ~ "Spleen")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) + xlab("Age") + facet_wrap(~Tissue_type_1) +
+  stat_compare_means(comparisons = my_comparisons) + stat_compare_means(comparisons = my_comparisons1) + scale_y_continuous(limits = c(55, 116))
+
+ggarrange(
+  cup1, cup2, cup3, nrow = 3,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/ALDH6A1/ggarranged.tiff"))
+```
+
+```{r}
+# MMP9
+# liver spleen skin bladder
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+my_comparisons2 <- list(c("40-60", "≥ 60"))
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+my_comparisons <- list(c("40-60", "≥ 60"), c("< 40", "≥ 60"), c("< 40", "40-60"))
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("HPA063909", "CAB068199")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+cup4 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 %in% c("liver", "skin", "urinary+bladder")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "liver" ~ "Liver",
+    Tissue_type_1 == "skin" ~ "Skin",
+    Tissue_type_1 == "urinary+bladder" ~ "Urinary bladder")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.85, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + facet_wrap(~Tissue_type_1)
+
+cup5 <- 
+  finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 %in% c("liver", "skin", "urinary+bladder")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "liver" ~ "Liver",
+    Tissue_type_1 == "skin" ~ "Skin",
+    Tissue_type_1 == "urinary+bladder" ~ "Urinary bladder")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_colour_npg() + scale_fill_npg() + facet_wrap(~Tissue_type_1)
+
+cup6 <- 
+  finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 %in% c("liver", "skin", "urinary+bladder")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "liver" ~ "Liver",
+    Tissue_type_1 == "skin" ~ "Skin",
+    Tissue_type_1 == "urinary+bladder" ~ "Urinary bladder")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) + xlab("Age") + facet_wrap(~Tissue_type_1) +
+  stat_compare_means(comparisons = my_comparisons, label.y = c(123, 135, 147)) + scale_y_continuous(limits = c(60, 155))
+  
+ggarrange(
+  cup4, cup5, cup6, nrow = 3,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/MMP9/ggarranged.tiff"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

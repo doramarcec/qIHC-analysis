@@ -1,0 +1,261 @@
+---
+title: "Visualization of the raw data"
+output: html_notebook
+---
+
+```{r}
+if (!require(devtools)) install.packages("devtools")
+devtools::install_github("gaospecial/ggVennDiagram")
+
+install.packages("VennDiagram")
+```
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+library(ggVennDiagram)
+library(VennDiagram)
+library(grid)
+library(futile.logger)
+```
+
+# Structure of the raw data
+How many subjects (sexes), antibodies, genes and tissues are in the entire dataset?
+
+## Subjects
+```{r}
+# Subjects divided by biological sex
+level_order <- c('≤ 40', '> 60')
+
+healthyECM %>%
+  group_by(Age2) %>%
+  count(Sex) %>%
+  ggplot() + aes(x = Age2, y = n, colour = Sex, fill = Sex, label = n) +
+  geom_col(position = position_dodge()) + 
+  ylab("Frequency of subjects") + xlab("Age") +
+  scale_x_discrete(limits = level_order) + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 13),
+  title = element_text(size = 14),
+  legend.position = "top",
+  plot.title = element_text(hjust = 0.5)
+  ) +
+  geom_text(position = position_dodge(width = 1), vjust = -0.5, size = 3) +
+  ggtitle("Frequency of subjects divided by biological sex")
+
+ggsave(here("output/rawData_sex.tiff"))
+
+healthyECM %>%
+  group_by(Age2) %>%
+  get_summary_stats()
+
+# Age distribution
+ECM %>%
+  ggplot() + aes(x = Age) + geom_density(colour = "#00BFC4") + theme_classic() + theme(
+  plot.title = element_text(hjust = 0.5),
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 13),
+  title = element_text(size = 15)) + ylab("Kernel density estimate of subject counts") + ggtitle("Age distribution in the raw data")
+ggsave(here("output/rawData_ageDist.tiff"), height = 7, width = 9)
+
+ECM %>%
+  ggplot() + aes(x = Age) + geom_histogram(fill = "#00BFC4") + theme_classic() + theme(
+  plot.title = element_text(hjust = 0.5),
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 13),
+  title = element_text(size = 15)) + ggtitle("Age distribution in the raw data") + ylab("Count of subjects")
+ggsave(here("output/rawData_ageDist_histogram.tiff"), height = 7, width = 9)
+
+healthyECM %>%
+  ggplot() + aes(x = Age) + geom_density(colour = "#00BFC4") + theme_classic() + theme(
+  plot.title = element_text(hjust = 0.5),
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 13),
+  title = element_text(size = 15)) + ylab("Kernel density estimate of subject counts") + ggtitle("Age distribution in the filtered data") + geom_vline(xintercept = 40, linetype = "dashed", colour = "gray", size = 0.5) + geom_vline(xintercept = 60, linetype = "dashed", colour = "gray", size = 0.5)
+ggsave(here("output/filteredData_ageDist.tiff"), height = 7, width = 9)
+
+healthyECM %>%
+  ggplot() + aes(x = Age) + geom_histogram(fill = "#00BFC4") + theme_classic() + theme(
+  plot.title = element_text(hjust = 0.5),
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 13),
+  title = element_text(size = 15)) + ggtitle("Age distribution in the filtered data") + geom_vline(xintercept = 40, linetype = "dashed", colour = "gray", size = 0.5) + geom_vline(xintercept = 60, linetype = "dashed", colour = "gray", size = 0.5) + ylab("Count of subjects")
+ggsave(here("output/filteredData_ageDist_histogram.tiff"), height = 7, width = 9)
+
+```
+
+## Antibodies
+```{r}
+# Antibodies
+healthyECM %>%
+  group_by(Age2) %>%
+  count(Antibody_name)
+
+x <- healthyECM %>%
+  select(Age2, Antibody_name) %>%
+  dplyr::filter(Age2 == "≤ 40") %>%
+  pull()
+
+x1 <- healthyECM %>%
+  select(Age2, Antibody_name) %>%
+  dplyr::filter(Age2 == "> 60") %>%
+  pull()
+
+venn(y, snames = c("≤ 40", "> 60"), zcolor = "#00BFC4", col = "#00BFC4", ilcs = 1.25, sncs = 1.25, borders = FALSE, box = FALSE, ggplot = TRUE)  
+
+ggsave(here("output/antibodyVenn.tiff"))
+```
+
+## Genes
+```{r}
+x2 <- healthyECM %>%
+  select(Age2, Gene_name) %>%
+  dplyr::filter(Age2 == "≤ 40") %>%
+  pull()
+
+x3 <-  healthyECM %>%
+  select(Age2, Gene_name) %>%
+  dplyr::filter(Age2 == "> 60") %>%
+  pull()
+
+y1 <- list(x2, x3)
+
+venn(y1, snames = c("≤ 40", "> 60"), zcolor = "#00BFC4", col = "#00BFC4", ilcs = 1.25, sncs = 1.25, borders = FALSE, box = FALSE, ggplot = TRUE)  
+
+ggsave(here("output/genesVenn.tiff"))
+```
+
+## Tissues
+```{r}
+healthyECM %>%
+  count(Tissue_type_1)
+
+x4 <- healthyECM %>%
+  select(Age2, Tissue_type_1) %>%
+  dplyr::filter(Age2 == "≤ 40") %>%
+  pull()
+
+x5 <-  healthyECM %>%
+  select(Age2, Tissue_type_1) %>%
+  dplyr::filter(Age2 == "> 60") %>%
+  pull()
+
+y2 <- list(x4, x5)
+
+venn(y2, snames = c("≤ 40", "> 60"), zcolor = "#00BFC4", col = "#00BFC4", ilcs = 1.25, sncs = 1.25, borders = FALSE, box = FALSE, ggplot = TRUE)  
+# esophagus, placenta and tonsil not in both age groupings
+
+ggsave(here("output/tissuesVenn.tiff"))
+```
+
+# Age distribution of the raw dataset and the two age-groups in this study
+How many images are there in each age group? How many genes contain antibodies in both age groups?
+```{r}
+# How many images are there in each group?
+healthyECM %>%
+  dplyr::filter(Age2 == "≤ 40") %>%
+  count(Image_file) # 44,552
+
+healthyECM %>%
+  dplyr::filter(Age2 == "> 60") %>%
+  count(Image_file) # 45,447
+
+# How many genes contain antibodies in both age groups?
+healthyECM %>%
+  group_by(Gene_name) %>%
+  count(., Antibody_name, Age2) %>% 
+  count(Antibody_name) %>% dplyr::filter(n > 1) %>%
+  distinct() # all genes contain at least 1 antibody in both age groups
+```
+
+# Inferential stats visualization
+Figures explaining the statistical tests I did.
+```{r}
+
+```
+
+# DE
+List all the genes that show significant difference between the two age groups in terms of intensity and quantity.
+```{r}
+wilcoxResults # sig DE genes (p < 0.05) found in 26 tissue types
+
+# Sig DE genes in order of the most to least frequently occuring ones
+wilcoxResults %>%
+  ungroup() %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+```
+
+# Age-related genes
+Summarise how many genes are found to be age-related in 1, 2, 3 and >3 tissues. About the HPA images, I think we need the images from one to two strong examples of known aging markers.
+```{r}
+# Intensity
+iTissueCount <- wilcoxIntensity %>%
+  ungroup() %>%
+  count(Gene_name)
+
+wilcoxIntensity <- full_join(wilcoxIntensity, iTissueCount)
+
+wilcoxIntensity <- wilcoxIntensity %>%
+  mutate(nTissues = case_when(
+    n == 1 ~ "1",
+    n == 2 ~ "2",
+    n == 3 ~ "3",
+    n > 3 ~ "> 3"
+  ))
+
+# Quantity
+qTissueCount <- wilcoxQuantity %>%
+  ungroup() %>%
+  count(Gene_name)
+
+wilcoxQuantity <- full_join(wilcoxQuantity, qTissueCount)
+
+wilcoxQuantity <- wilcoxQuantity %>%
+  mutate(nTissues = case_when(
+    n == 1 ~ "1",
+    n == 2 ~ "2",
+    n == 3 ~ "3",
+    n > 3 ~ "> 3"
+  ))
+
+wilcoxResults <- full_join(wilcoxIntensity, wilcoxQuantity)
+```
+
+```{r}
+# Plot
+level_order1 <- c('> 3', '3', '2', '1')
+
+wilcoxResults %>%
+  dplyr::filter(.y. == "Intensity") %>%
+  ggplot() + aes(y = nTissues) + geom_bar(position = position_dodge(), orientation = "y", fill = "#00BFC4") + ggtitle("Age-related genes in one or more tissue types") + scale_y_discrete(limits = level_order1) + xlab("Number  of genes") + ylab("Number of tissue types") + labs(subtitle = "Significant difference in Intensity") + scale_x_continuous(position = "bottom") + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 13),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  plot.subtitle = element_text(hjust = 0.5)) 
+  #scale_fill_manual(values = c("#00BCD4", "#FFC107"), na.translate = F)
+
+ggsave(here("output/ageRelated_barchart_intensity.tiff"))
+
+wilcoxResults %>%
+  dplyr::filter(.y. == "Quantity") %>%
+  ggplot() + aes(y = nTissues) + geom_bar(position = position_dodge(), orientation = "y", fill = "#00BFC4") + ggtitle("Age-related genes in one or more tissue types") + scale_y_discrete(limits = level_order1) + xlab("Number  of genes") + ylab("Number of tissue types") + labs(subtitle = "Significant difference in Quantity") + scale_x_continuous(position = "bottom") + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 13),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  plot.subtitle = element_text(hjust = 0.5)) 
+  #scale_fill_manual(values = c("#00BCD4", "#FFC107"), na.translate = F)
+
+ggsave(here("output/ageRelated_barchart_quantity.tiff"))
+```
+
+
+

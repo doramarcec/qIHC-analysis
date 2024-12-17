@@ -1,0 +1,125 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+#library(stats)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+```
+
+```{r}
+wilcoxResults %>%
+  arrange(p)
+
+corrResults %>%
+  arrange(p)
+
+sigRes <- inner_join(wilcoxResults, corrResults, by = c("Gene_name", "Tissue_type_1", ".y." = "var1"))
+sigRes
+
+ggplot(sigRes) + aes(x = (cor)) + geom_density()
+ggplot(sigRes) + aes(x = abs(cor)) + geom_density()
+```
+
+# KRT8: endometrium -> glandular (epithelial) cells 
+https://www.proteinatlas.org/humanproteome/single+cell+type/Glandular+epithelial+cells
+```{r}
+ECM %>%
+  select(Gene_name, Tissue_type_1, Antibody_name, Image_file, Sex, Age, Intensity, SD, Max, '0.75', Median, '0.25', Min, Quantity, Staining, Age2) %>%
+  dplyr::filter(Gene_name == "KRT8") %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Tissue_type_1) + scale_x_discrete(limits = level_order)
+
+sigRes %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "KRT8")
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "KRT8") %>%
+  ggplot() + aes(x = Age2, y = `Variable value`, colour = Variable) + geom_boxplot() + scale_x_discrete(limits = level_order)
+
+ggsave(here("output/KRT8_endometrium_boxplot.png"), width = 8, height = 7)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "KRT8") %>%
+  ggplot() + aes(x = Age, y = `Variable value`, colour = Variable) + geom_point() + geom_smooth(method = "lm")
+
+ggsave(here("output/KRT8_endometrium_linReg.png"), width = 8, height = 7)
+```
+
+# SERPINB5: cervix -> squamous epithelial cells
+```{r}
+ECM %>%
+  select(Gene_name, Tissue_type_1, Antibody_name, Image_file, Sex, Age, Intensity, SD, Max, '0.75', Median, '0.25', Min, Quantity, Staining, Age2) %>%
+  dplyr::filter(Gene_name == "SERPINB5") %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Tissue_type_1) + scale_x_discrete(limits = level_order)
+
+sigRes %>%
+  dplyr::filter(Tissue_type_1 == "cervix%2C+uterine", Gene_name == "SERPINB5")
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "cervix%2C+uterine", Gene_name == "SERPINB5") %>%
+  ggplot() + aes(x = Age2, y = `Variable value`, colour = Variable) + geom_boxplot() 
+
+ggsave(here("output/SERPINB5_cervix_boxplot.png"), width = 8, height = 7)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "cervix%2C+uterine", Gene_name == "SERPINB5") %>%
+  ggplot() + aes(x = Age, y = `Variable value`, colour = Variable) + geom_point() + geom_smooth(method = "lm")
+
+ggsave(here("output/SERPINB5_cervix_linReg.png"), width = 8, height = 7)
+```
+
+# PDGFB: skin -> keratinocytes and epidermal cells (stratified, squamous epithelial layer)
+```{r}
+ECM %>%
+  select(Gene_name, Tissue_type_1, Antibody_name, Image_file, Sex, Age, Intensity, SD, Max, '0.75', Median, '0.25', Min, Quantity, Staining, Age2) %>%
+  dplyr::filter(Gene_name == "PDGFB") %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Tissue_type_1) + scale_x_discrete(limits = level_order)
+
+sigRes %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "PDGFB")
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "PDGFB") %>%
+  ggplot() + aes(x = Age2, y = `Variable value`, colour = Variable) + geom_boxplot() + scale_x_discrete(limits = level_order)
+
+ggsave(here("output/PDGFB_skin_boxplot.png"), width = 8, height = 7)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "PDGFB") %>%
+  ggplot() + aes(x = Age, y = `Variable value`, colour = Variable) + geom_point() + geom_smooth(method = "lm")
+
+ggsave(here("output/PDGFB_skin_linReg.png"), width = 8, height = 7)
+```
+
+# DECR1: skin -> keratinocytes and epidermal cells (stratified, squamous epithelial layer)
+```{r}
+ECM %>%
+  select(Gene_name, Tissue_type_1, Antibody_name, Image_file, Sex, Age, Intensity, SD, Max, '0.75', Median, '0.25', Min, Quantity, Staining, Age2) %>%
+  dplyr::filter(Gene_name == "DECR1") %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Tissue_type_1) + scale_x_discrete(limits = level_order)
+
+sigRes %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "DECR1")
+
+level_order <- c('young', 'adult', 'elderly')
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "DECR1") %>%
+  ggplot() + aes(x = Age2, y = `Variable value`, colour = Variable) + geom_boxplot() + scale_x_discrete(limits = level_order)
+
+ggsave(here("output/DECR1_skin_boxplot.png"), width = 8, height = 7)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "DECR1") %>%
+  ggplot() + aes(x = Age, y = `Variable value`, colour = Variable) + geom_point() + geom_smooth(method = "lm")
+
+ggsave(here("output/DECR1_skin_linReg.png"), width = 8, height = 7)
+```
+

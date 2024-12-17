@@ -1,0 +1,94 @@
+---
+title: "Statistics: significant difference in protein expression"
+output: html_notebook
+---
+
+```{r}
+install.packages("car")
+install.packages("rstatix")
+
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(stats)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+```
+
+# Inferential statistics: does the protein expression across the 4 age categories (young, adult, middle-aged, elderly) statistically differ?
+## Intensity
+
+```{r}
+# Tesf of normality: Shapiro-Wilk or Kolmogorov-Smirnov?
+
+skinECM %>%
+  count(Age2)
+
+skinECM %>%
+  count(Gene_name)
+
+# Shapiro-Wilk test
+skinECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Intensity)
+# p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Plotting the distribution of intensities as a density plot
+skinECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density()
+# not a normal distribution -> positively skewed
+```
+
+```{r}
+# Kruskal-Wallis test
+skinECM %>%
+  kruskal_test(Intensity~Age2)
+# p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# post-hoc analysis
+skinECM %>%
+  dunn_test(Intensity~Age2)
+# sig difference between young and the remaining three groups, but no sig difference between adult, middle-aged and elderly groups
+```
+
+## Quantity
+
+```{r}
+# Tesf of normality: Shapiro-Wilk or Kolmogorov-Smirnov?
+
+skinECM %>%
+  count(Age2)
+
+# Shapiro-Wilk test
+skinECM %>%
+  group_by(Age2) %>%
+  shapiro_test(Quantity)
+# p < 0.05 in all samples -> data deviates from a normal distribution
+
+# Plotting the distribution of intensities as a density plot
+skinECM %>%
+  select(Age2, Quantity) %>%
+  ggplot() + aes(x = Quantity, colour = Age2) + geom_density()
+# not a normal distribution -> VERY positively skewed
+```
+
+```{r}
+# Kruskal-Wallis test
+skinECM %>%
+  kruskal_test(Quantity~Age2)
+# p < 0.05 -> there is a significant difference between samples
+```
+
+```{r}
+# post-hoc analysis
+skinECM %>%
+  dunn_test(Quantity~Age2)
+# sig difference between adult and the remaining three groups, but no sig difference between young, middle-aged and elderly groups
+```
+

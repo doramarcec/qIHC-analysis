@@ -1,0 +1,86 @@
+---
+title: "HPAanalyze"
+output: html_notebook
+---
+
+```{r}
+#Install packages
+install.packages(c("tidyverse", "openxlsx", "xml2", "stats", "utils", "gridExtra", "here"))
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install(c("hpar", "HPAanalyse"))
+```
+
+```{r}
+# Load package libraries
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(stats)
+library(utils)
+library(conflicted)
+library(here)
+library(hpar)
+library(gridExtra)
+library(HPAanalyze)
+```
+
+```{r}
+# Download the HPA data
+#downloadedData <- hpaDownload(downloadList = c('histology', 'rna tissue', 'rna cell type', 'isoform'), version = "latest")
+downloadedData <- hpaDownload(downloadList = 'histology', version = "latest")
+
+hpaXml(inputXml = 'ENSG00000000003', extractType = 'TissueExprSum')
+
+# Subset the HPA data
+tissueList <- c('skin', 'skin 1', 'skin 2')
+
+subsetData <- hpaSubset(data = downloadedData, 
+                        targetTissue = tissueList)
+```
+
+```{r}
+# Data manipulation
+skinHistology <- subsetData$normal_tissue %>%
+  mutate(`tissue` = case_when(
+    `tissue` == "skin 1" ~ "skin",
+    `tissue` == "skin 2" ~ "skin")) #%>%
+  dplyr::filter(cell_type == "epidermal cells", level == "High") # using HPA to identify epidermal markers
+```
+
+# Skin histology: epidermis
+
+Divided into:
+- basal cell layer (stratum germinativum)
+- squamous cell layer (stratum spinosum)
+- granular cell layer (stratum granulosum)
+- cornified cell layer (stratum corneum)
+
+Cell types:
+- keratinocytes
+- Langerhans cells (immune cells)
+- melanocytes
+
+```{r}
+# Epidermis
+epidermis <- skinHistology %>%
+  dplyr::filter(cell_type %in% c('cells in basal layer', 'cells in corneal layer', 'cells in granular layer', 'cells in spinous layer', 'epidermal cells', 'extracellular matrix', 'keratinocytes', 'melanocytes'))
+
+## Genes highly expressed in the basal layer
+basalLayer <- epidermis %>%
+  dplyr::filter(cell_type %in% c('cells in basal layer')) %>%
+  dplyr::filter(reliability == "Approved") %>%
+  distinct()
+
+hpaVis(data = subsetData,
+       targetGene = c('ENSG00000127824', 'ENSG00000143933', 'ENSG00000160014', 'ENSG00000163286', 'ENSG00000165475', 'ENSG00000168148', 'ENSG00000178363', 'ENSG00000183598', 'ENSG00000184009', 'ENSG00000188375', 'ENSG00000197153', 'ENSG00000197409', 'ENSG00000203852', 'ENSG00000230667', 'ENSG00000268799', 'ENSG00000270757', 'ENSG00000273213', 'ENSG00000273983', 'ENSG00000274750', 'ENSG00000275379', 'ENSG00000275714', 'ENSG00000277775', 'ENSG00000278828', 'ENSG00000286522', 'ENSG00000287080', 'ENSG00000288558'),
+       targetTissue = c('skin', 'skin 1', 'skin 2'),
+       targetCellType = "cells in basal layer",
+       visType = c("Tissue", "Subcell"))
+
+# H3 -> histone 3 genes => proliferation
+# TUBA4A -> tubulin => ECM
+# SETSIP -> transcription activator, enables chromatin binding => proliferation
+```
+

@@ -1,0 +1,188 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+library(ggpubr)
+#install.packages("ggpmisc")
+library(ggpmisc)
+#install.packages("ggpubr")
+library(ggpubr)
+```
+
+# Adipose tissue
+```{r}
+wilcoxResults %>%
+  dplyr::filter(Tissue_type_1 == "adipose+tissue")
+
+# Boxplots
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "adipose+tissue", Gene_name %in% c("ANXA9", "ETFB", "KNG1", "PDHB", "SCP2", "UGDH", "ALDH6A1", "AXL", "CFI", "CTNNB1", "FGA", "FGFR4", "SUCLG1")) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+# Linear regression
+```
+
+# Skin
+```{r}
+skinGenes <- wilcoxResults %>%
+  dplyr::filter(Tissue_type_1 == "skin") %>%
+  pull(Gene_name)
+
+# Boxplots
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name %in% skinGenes) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name %in% skinGenes) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+# Linear regression
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name %in% skinGenes) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name %in% skinGenes) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+## DECR1
+```{r}
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "DECR1") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot(colour = "#00BFC4") + scale_x_discrete(limits = level_order) + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 15),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  legend.title = element_blank(),
+  legend.position = "top"
+  ) +
+  ggtitle("Change in DECR1 expression throughout ageing") + xlab("Age") + ylab("Intensity")
+
+ggsave(here("output/DECR1_skin_boxplot.tiff"), height = 7, width = 8)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "DECR1") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point(colour = "#00BFC4") + geom_smooth(method = "lm", colour = "#737373", se = FALSE) + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 15),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  legend.position = "top",
+  legend.title = element_blank()
+  ) +
+  ggtitle("Linear regression of DECR1 expression throughout ageing") + stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+ggsave(here("output/DECR1_skin_linReg.tiff"), height = 7, width = 8)
+```
+
+## PDGFB
+```{r}
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "PDGFB") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot(colour = "#00BFC4") + scale_x_discrete(limits = level_order) + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 15),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  legend.position = "top",
+  legend.title = element_blank()
+  ) +
+  ggtitle("Change in PDGFB expression throughout ageing") + xlab("Age") + ylab("Intensity")
+
+ggsave(here("output/PDGFB_skin_boxplot.tiff"), height = 7, width = 8)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "skin", Gene_name == "PDGFB") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point(colour = "#00BFC4") + geom_smooth(method = "lm", colour = "#737373", se = FALSE) + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 15),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  legend.position = "top",
+  legend.title = element_blank()
+  ) +
+  ggtitle("Linear regression of PDGFB expression throughout ageing") + stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.94)
+
+ggsave(here("output/PDGFB_skin_linReg.tiff"), height = 7, width = 8)
+```
+
+
+# Endometrium
+```{r}
+endometriumGenes <- wilcoxResults %>%
+  dplyr::filter(Tissue_type_1 == "endometrium") %>%
+  pull(Gene_name)
+
+# Boxplots
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name %in% endometriumGenes) %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name %in% endometriumGenes) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Gene_name) + scale_x_discrete(limits = level_order)
+
+# Linear regression
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name %in% endometriumGenes) %>%
+  ggplot() + aes(x = Age, y = Quantity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name %in% endometriumGenes) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm")
+```
+
+## KRT8
+```{r}
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "KRT8", Antibody_name != "Antibody CAB000131") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot(colour = "#00BFC4") + scale_x_discrete(limits = level_order) + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 15),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  legend.position = "top",
+  legend.title = element_blank()
+  ) +
+  ggtitle("Change in KRT8 expression throughout ageing") + xlab("Age") + ylab("Intensity")
+
+ggsave(here("output/KRT8_endometrium_boxplot.tiff"), height = 7, width = 8)
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "endometrium", Gene_name == "KRT8", Antibody_name != "Antibody CAB000131") %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point(colour = "#00BFC4") + geom_smooth(method = "lm", colour = "#737373", se = FALSE) + theme_classic() + theme(
+  axis.text = element_text(size = 12, colour = "black"),
+  axis.title = element_text(size = 15),
+  title = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5),
+  legend.position = "top",
+  legend.title = element_blank()
+  ) +
+  ggtitle("Linear regression of KRT8 expression throughout ageing") + stat_regline_equation(label.x.npc = 0.80, label.y.npc = 1) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.80, label.y.npc = 0.94)
+
+ggsave(here("output/KRT8_endometrium_linReg.tiff"), height = 7, width = 8)
+```
+
+
+
+
+

@@ -1,0 +1,43 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+install.packages("here")
+```
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(stats)
+library(utils)
+library(conflicted)
+library(here)
+```
+
+```{r}
+# Data import
+ECM <- read.xlsx(here("data", "ECM_data.xlsx"))
+ECM
+
+# Data manipulation
+skinECM <- ECM %>%
+  remove_rownames() %>%
+  dplyr::filter(Tissue_type_1 == "skin" & Tissue_type_2 == "Normal tissue, NOS (M-00100)")
+```
+
+```{r}
+# Sample classification by age
+skinECM$Age2 <- skinECM$Age
+
+skinECM <- skinECM %>%
+  mutate(Age2 = case_when(
+    Age2 <= "19" ~ "young",
+    Age2 > "19" & Age2 <= 40 ~ "adult",
+    Age2 > "40" & Age2 <= 60 ~ "middle-aged",
+    Age2 > "60" ~ "elderly"
+  ))
+```
+

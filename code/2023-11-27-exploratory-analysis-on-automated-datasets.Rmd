@@ -1,0 +1,76 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+#library(stats)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+```
+
+```{r}
+wilcoxResults %>%
+  dplyr::filter(Tissue_type_1 == "skin") %>%
+  arrange(p)
+
+corrResults %>%
+  dplyr::filter(Tissue_type_1 == "skin") %>%
+  arrange(p)
+
+healthyECM <- healthyECM %>%
+  pivot_longer(cols = c("Intensity", "Quantity"), names_to = "Variable", values_to = "Variable value")
+
+# 0.6 or 0.8 threshold
+```
+
+# CS
+```{r}
+ECM %>%
+  select(Gene_name, Tissue_type_1, Antibody_name, Image_file, Sex, Age, Intensity, SD, Max, '0.75', Median, '0.25', Min, Quantity, Staining, Age2) %>%
+  dplyr::filter(Gene_name == "ADAMTS9") %>%
+  ggplot() + aes(x = Age2, y = Quantity) + geom_boxplot() + facet_wrap(~Tissue_type_1) + scale_x_discrete(limits = level_order)
+
+# stomach -> intensity goes down with age but quantity goes up
+
+corrResults %>%
+  dplyr::filter(Tissue_type_1 == "stomach", Gene_name == "CS")
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "stomach", Gene_name == "CS", Antibody_name == "Antibody HPA038461") %>%
+  ggplot() + aes(x = Age2, y = `Variable value`, colour = Variable) + geom_boxplot() 
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "stomach", Gene_name == "CS", Antibody_name == "Antibody HPA038461") %>%
+  ggplot() + aes(x = Age, y = `Variable value`, colour = Variable) + geom_point() + geom_smooth(method = "lm")
+```
+
+# APOA4
+```{r}
+ECM %>%
+  select(Gene_name, Tissue_type_1, Antibody_name, Image_file, Sex, Age, Intensity, SD, Max, '0.75', Median, '0.25', Min, Quantity, Staining, Age2) %>%
+  dplyr::filter(Gene_name == "APOA4") %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + facet_wrap(~Tissue_type_1) + scale_x_discrete(limits = level_order)
+
+# stomach -> intensity goes down with age but quantity goes up
+
+corrResults %>%
+  dplyr::filter(Tissue_type_1 == "stomach", Gene_name == "CS")
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "stomach", Gene_name == "CS", Antibody_name == "Antibody HPA038461") %>%
+  ggplot() + aes(x = Age2, y = `Variable value`, colour = Variable) + geom_boxplot() 
+
+healthyECM %>%
+  dplyr::filter(Tissue_type_1 == "stomach", Gene_name == "CS", Antibody_name == "Antibody HPA038461") %>%
+  ggplot() + aes(x = Age, y = `Variable value`, colour = Variable) + geom_point() + geom_smooth(method = "lm")
+
+# how many antibodies have tissue profile of intensity = 0 and remove those antibodies 
+```
+

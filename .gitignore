@@ -1,0 +1,6 @@
+.RData
+.Rhistory
+.Rproj
+code/*.html
+data/
+output/

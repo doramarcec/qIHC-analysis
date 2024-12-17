@@ -1,0 +1,32 @@
+---
+title: "Additional datasets"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(xml2)
+library(utils)
+library(conflicted)
+library(here)
+library(car)
+library(rstatix)
+library(ggpubr)
+```
+
+```{r}
+# Wang D, Eraslan B, Wieland T, Hallström B, Hopf T et al. (2019) A deep proteome and transcriptome abundance atlas of 29 healthy human tissues. (https://www.ebi.ac.uk/gxa/experiments/E-PROT-29/Downloads)
+
+eprot29ExpDes <- read_tsv(here("data", "E-PROT-29-experiment-design.tsv"), col_types = list(col_character(), col_double(), col_factor(), col_integer(), col_logical(), col_number()))
+eprot29Res <- read.xlsx(here("data", "E-PROT-29-query-results.xlsx")) # expression values across all genes
+
+eprot29Res <- eprot29Res %>%
+  pivot_longer(cols = c("adipose.tissue", "adrenal.gland", "bone.marrow", "brain", "colon", "duodenum", "endometrium", "esophagus", "fallopian.tube", "gallbladder", "heart", "kidney", "liver", "lung", "lymph.node", "ovary", "pancreas", "pituitary.gland", "placenta", "prostate", "rectum", "salivary.gland", "small.intestine", "smooth.muscle", "spleen", "stomach", "testis", "thyroid", "tonsil", "urinary.bladder", "vermiform.appendix"), names_to = "Tissue", values_to = "Expression_level_in_parts_per_billion")
+```
+
+```{r}
+
+```
+
+
