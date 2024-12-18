@@ -196,15 +196,15 @@ dunnResults <- b %>%
 dunnResults 
 ```
 
-By doing so, we get the following output structure:
+By doing so, we get the 219,703-row tibble with the following output structure:
 Tissue | Gene | Antibody | Sex | Age | Age2 | Subject | Intensity | SD | group1 | group2 | n1 | n2 | statistic | p | p.adj.sifnif 
 --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- 
 adipose+tissue | BGN | CAB003678 | M | 26 | < 40 | 1995 | 62.74 | 25.57 | < 40 | 40-60 | 1297 | 1189 | 5.17 | 2.33e-07 | ****
 
 Now that we know which tissues have significant differences in protein expression and between which age groups these differences occur, we want to know which genes and proteins contribute to it.
 
-# 3. Among the tissue types with significant differences, which genes do significantly statistically differ in intensity?
-Here, we will use the same Kruskall-Wallis function we defined in the first step, but this time we will apply it to the Gene column instead of the Tissue column. 
+## 3. Among the tissue types with significant differences, which genes do significantly statistically differ in intensity?
+Here, we will use the same Kruskall-Wallis function we defined in the first step, but this time we will apply it to the Gene column instead of the Tissue column, and include the filtering step based on our set significance threshold. 
 
 ```
 c <- b %>%
@@ -233,5 +233,98 @@ kruskalGenes <- c %>%
   dplyr::filter(p < 0.001)
 kruskalGenes
 ```
+Running this chunk of code identified 73 genes (out of 734) which significantly differ in intensity across two or more age groups, in the 34 tissues identified above, which brings us to the last part of our workflow. 
+
+## 4. Which age groups significantly statistically differ in each of those genes?
+Once again, as we used the Kruskall-Wallis test in the previous step, we need to use Dunn's test in the post-hoc analysis to identify the specific genes which significantly differ.
+
+```
+d <- c %>%
+  group_by(Gene_name) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest()
+
+d$data[[1]]
+
+d <- c %>%
+  group_by(Gene_name) %>%
+  dplyr::filter(p < 0.001) %>%
+  nest() %>%
+  mutate(Dunn = map(data, doDunnsTest))
+
+d$Dunn[[1]]
+
+# Tidy the data frames
+d <- d %>%
+  unnest(data) %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, Dunn) %>%
+  unnest(Dunn)
+
+dunnResults <- d %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD, group1, group2, n1, n2, statistic, p, p.adj.signif) %>%
+  dplyr::filter(p < 0.001) %>%
+  group_by(Gene_name) %>%
+  arrange(.by_group = TRUE)
+dunnResults 
+```
+Finally, this generates a 39,265-row tibble of the following format:
+Tissue | Gene | Antibody | Sex | Age | Age2 | Subject | Intensity | SD | group1 | group2 | n1 | n2 | statistic | p | p.adj.sifnif 
+--- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- 
+adipose+tissue | ABAT | HPA041528 | F | 26 | < 40 | 2744 | 68.91 | 28.46 | < 40 | 40-60 | 104 | 100 | 4.73 | 2.24e-07 | ****
+
+From this tibble, we start the exploration and visualisation of differentially expressed proteins. By counting the number of genes in the descending order as below, we discover that matrix metalloproteinase 9 (MMP9) is the protein that is differentially expressed in the greatest number of samples. 
+
+```
+dunnResults %>%
+  ungroup() %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+```
+To explore the data further, we will separate the dunnResults tibble into new data frames where we group the tissues with similar functions or that make a single organ (e.g. basal ganglia, cerebellum, cerebral cortex and hippocampal formation into the *brain* data frame) as such:
+
+```
+metabolicRes <- dunnResults %>%
+  dplyr::filter(Tissue_type_1 == c("spleen", "liver"))
+```
+
+Next, we will count the number of genes in the newly created data frames to identify the genes differentially expressed in the greatest number of image samples. 
+```
+metabolicRes %>%
+  count(Gene_name) %>%
+  arrange(desc(n))
+```
+
+Visualisation of the relationship between intensity and age in each of the 73 genes would be a long and laborious task, so I defined a function that automatically plots the linear regression. 
+```
+plotLinReg <- function(x) {
+  x %>%
+    ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + 
+    geom_point() + facet_wrap(~Tissue_type_1, scales = "free_x") + geom_smooth(method = "lm")
+}
+```
+
+The output is going to be stored in a newly created, nested data frame, and we are going to write a loop to display all linear regression plots simultaneously. Note that we are colouring the plot by the antibody names. That is because the purpose of this step is to identify whether or not the different antibodies that were used follow the same pattern or deviate from each other. 
+```
+metabolicLinReg <- metabolicRes %>%
+  group_by(Gene_name) %>%
+  nest()
+
+metabolicLinReg$data[[1]]
+
+metabolicLinReg <- metabolicRes %>%
+  group_by(Gene_name) %>%
+  nest() %>%
+  mutate(LinReg = map(data, plotLinReg))
+
+metabolicLinReg$LinReg[[1]]
+
+# Display all the linear regression plots at once
+for (a in seq_along(metabolicLinReg$LinReg)) {
+  print(metabolicLinReg$LinReg[[a]])
+}
+```
+
+During this step, we are also going to filter out any antibodies that produced outliers in the data. 
+
 
 
