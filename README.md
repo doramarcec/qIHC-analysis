@@ -4,7 +4,7 @@ The process of ageing induces physiological changes at cellular and molecular le
 
 This project was my Bachelor's thesis, and its purpose was to identify a subset of mitochondrial and extracellular matrix proteins whose expression levels significantly change during ageing and curate a list of proteins that are differentially expressed across multiple age groups, in a single or multiple tissue types. The objectives to achieve this include i) development of a differential expression workflow which will perform a thorough statistical testing for significance between staining intensity levels, representative of protein expression, across age groups, and ii) the implementation of the developed workflow on the quantitative data from mitochondrial proteome and the matrisome to identify the proteins of interest.
 
-*Data structure*
+**Data structure**
 Data mining techniques were used by the host lab to obtain i) 153,919 pathologist-annotated immunohistochemistry images spanning 44 tissue types and ii) patient metadata from the Human Protein Atlas database. The images were batch processed using a custom MATLAB script, generating a dataset of the following structure:
 
 Gene | Tissue_1 | Antibody | Image | Sex | Age | Tissue_2 | Subject | Intensity | SD | Max | 75 | Median | 25 | Min | Quantity | Staining
@@ -103,4 +103,5 @@ ggsave(here("output/density-and-qq2.tiff"), height = 4, width = 9)
 ```
 
 This produced the following visual:
+![density-and-qq](https://github.com/user-attachments/assets/14758f9d-0940-413e-9b52-62b352b3db71)
 
