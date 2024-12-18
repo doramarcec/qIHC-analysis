@@ -67,9 +67,9 @@ ECM$Age2 <- as.numeric(as.character(ECM$Age))
 
 ECM <- ECM %>%
   mutate(Age2 = case_when(
-    Age2 < 40 ~ "< 40", # young
-    Age2 >= 40 & Age2 < 60 ~ "40-60", # middle-aged
-    Age2 >= 60 ~ "≥ 60" # elderly
+    Age2 < 40 ~ "< 40", 
+    Age2 >= 40 & Age2 < 60 ~ "40-60", 
+    Age2 >= 60 ~ "≥ 60" 
   )) %>%
   drop_na()
 
@@ -78,5 +78,29 @@ ECM %>%
 
 level_order <- c('< 40', '40-60', '≥ 60')
 ```
+The remainder of the analysis will center around inferential statistics, aiming to identify whether the protein expression across the three age categories statistically differs. 
 
+We start off with normality testing to know which statistical tests will be the most appropriate in the upcoming steps. As the sample size was to big for formal normality test (i.e. Shapiro-Wilk test, with a sample size limit of 5000), density and QQ plots were used. 
+
+```
+dp <- ECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(x = Intensity, colour = Age2) + geom_density() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Intensity distribution") + ylab("Density")
+
+qqp <- ECM %>%
+  select(Age2, Intensity) %>%
+  ggplot() + aes(sample = Intensity, colour = Age2) + geom_qq() + geom_qq_line() + 
+  scale_colour_npg() + scale_fill_npg() + ggtitle("Q-Q plot of intensities") + 
+  ylab("Sample quantiles") + xlab("Theoretical quantiles")
+
+ggarrange(
+  dp1, qqp1,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/density-and-qq2.tiff"), height = 4, width = 9)
+```
+
+This produced the following visual:
 
