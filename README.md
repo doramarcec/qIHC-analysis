@@ -6,7 +6,7 @@ This project was the basis of my Bachelor's thesis. The host lab used data minin
 
 The purpose of the project was to identify a subset of mitochondrial and extracellular matrix proteins whose expression levels significantly change during ageing and curate a list of proteins that are differentially expressed across multiple age groups, in single or multiple tissue types. The objectives to achieve this include i) the development of a differential expression workflow which will perform thorough statistical testing for significance between staining intensity levels, representative of protein expression, across age groups, and ii) the implementation of the developed workflow on the quantitative data from mitochondrial proteome and the matrisome to identify the proteins of interest.
 
-**Data structure**
+**Data structure**<br/>
 The images were batch-processed using a custom MATLAB script, generating a dataset of the following structure:
 
 Gene | Tissue_1 | Antibody | Image | Sex | Age | Tissue_2 | Subject | Intensity | SD | Max | 75 | Median | 25 | Min | Quantity | Staining
