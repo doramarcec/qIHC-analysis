@@ -447,8 +447,10 @@ ggarrange(
 ggsave(here("output/MMP9/ggarranged.tiff"))
 ```
 
-The above chunk of code generates the plot below, showcasing i) linear regression plots with strong correlation values of high significance across all three tissue types, ii) the linear regression plots coloured by antibody names demonstrating a common pattern in intensity levels regardless of different antibodies, and iii) box plots with pairwise comparisons between the three age groups, labelled by p values. 
+The above chunk of code generates the plot below, showcasing 
+1) linear regression plots with strong correlation values of high significance across all three tissue types,
+2) the linear regression plots coloured by antibody names, demonstrating a common pattern in intensity levels regardless of different antibodies,
+3) box plots with pairwise comparisons between the three age groups, labelled by *p* values. 
 ![mmp9](https://github.com/user-attachments/assets/57948d55-2a06-4f37-94fb-b2fe437b0b80)
 
-
-
+The results from this analysis support the notion that MMP9 may represent an ageing biomarker in different tissues, alongside two novel, potentially age-related proteins, identified in this study (undisclosed in this repository). 
