@@ -303,7 +303,7 @@ plotLinReg <- function(x) {
 }
 ```
 
-The output is going to be stored in a newly created, nested data frame, and we are going to write a loop to display all linear regression plots simultaneously. Note that we are colouring the plot by the antibody names. That is because the purpose of this step is to identify whether or not the different antibodies that were used follow the same pattern or deviate from each other. 
+The output will be stored in a newly created, nested data frame, and we will write a loop to display all linear regression plots simultaneously. Note that we are colouring the plot by the antibody names. That is because the purpose of this step is to identify whether or not the different antibodies used follow the same pattern or deviate from each other. 
 ```
 metabolicLinReg <- metabolicRes %>%
   group_by(Gene_name) %>%
@@ -324,7 +324,131 @@ for (a in seq_along(metabolicLinReg$LinReg)) {
 }
 ```
 
-During this step, we are also going to filter out any antibodies that produced outliers in the data. 
+During this step, we will filter out any antibodies that produced outliers in the data. While going through the regression plots, we've identified that the plots with optimal linear regressions correspond to genes ADAMTS13, ALDH6A1 and MMP9. We have identified that three antibodies produced outliers in the samples corresponding to these genes (CAB000348, HPA029074, and HPA001238) and we are therefore going to filter them out, before plotting linear regression again to assess the relationship between intensity and age without outliers. This time, we are also going to include the correlation analysis. 
+
+```
+# Linear regression for liver
+metabolicRes %>%
+  dplyr::filter(Gene_name %in% c("ADAMTS13", "ALDH6A1", "MMP9"), Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "Antibody HPA029074", "HPA001238")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  facet_wrap(~Gene_name, scales = "free_x") + geom_smooth(method = "lm") +
+  stat_regline_equation(label.x.npc = 0.0025, label.y.npc = 0.75) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+           label.x.npc = 0.0025, label.y.npc = 0.70)
+
+ggsave(here("output/metabolicLinReg.png"), height = 4, width = 9)
+```
+
+The output shows that after filtering the outliers out, the generated model is a poor fit for the intensity and age parameters in ADAMTS13 samples as only 9.9% of the variability in intensity could be explained by age, and that is insignificant (p = 0.2). In the case of ALDH6A1, the model predicts that 53% of the variability in intensity levels is explained by age with high significance (p < 0.0001). Lastly, the model is a strong fit for MMP9 intensity level and age parameters, predicting 83% of the variability in intensity to be explained by age, with high significance (p < 0.0001).  
+![metabolicLinReg](https://github.com/user-attachments/assets/d2c2ebea-4073-4c5a-9bdc-89aa31af608c)
+
+Now that we know which antibodies to keep (and after doing this for every tissue type), we will store all of our tissue-specific results in a general results data frame. 
+```
+lip5 <- metabolicRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238"))
+results <- full_join(results, lip5)
+```
+
+Next, we will only select columns of interest and remove any duplicates (i.e. IHC image sample replicates), as we want to focus on individual subjects.
+```
+finalRes <- results %>%
+  select(Tissue_type_1, Gene_name, Antibody_name, Sex, Age, Age2, Subject_ID, Intensity, SD) %>%
+  unique()
+```
+
+We are going to use this data frame to perform formal correlation testing, and output the results in an Excel spreadsheet. 
+```
+# Correlation testing to validate the results
+testCorrelation <- function(x) {
+    x %>%
+    rstatix::cor_test(Intensity, Age, method = "spearman")
+}
+
+corr <- finalRes %>%
+  group_by(Tissue_type_1, Gene_name) %>%
+  nest() %>%
+  mutate(Correlation = map(data, testCorrelation))
+
+corr$data[[1]]
+corr$Correlation[[1]]
+
+# Unnest the data frames
+corr <- corr %>%
+  unnest(Correlation)
+
+# Filter and export the significant samples
+corrExport <- corr %>%
+  dplyr::filter(p < 0.05) %>%
+  arrange(p) %>%
+  select(-data)
+
+write.xlsx(corrExport, file = "correlations.xlsx")
+```
+
+We will also use that data frame to visualise the data for all tissue types in which a gene of interest had differential intensity. Moreover, we are also going to perform a pairwise comparison of the intensity means between the three groups, to include the significance labels in the final figure. 
+
+Let's say our gene of interest is MMP9, and we found it has a differential intensity in the liver, spleen, skin and bladder. 
+```
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+my_comparisons2 <- list(c("40-60", "≥ 60"))
+
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen") %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+my_comparisons <- list(c("40-60", "≥ 60"), c("< 40", "≥ 60"), c("< 40", "40-60"))
+
+finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "urinary+bladder", Antibody_name %!in% c("HPA063909", "CAB068199")) %>%
+  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
+
+cup4 <- finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 %in% c("liver", "skin", "urinary+bladder")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "liver" ~ "Liver",
+    Tissue_type_1 == "skin" ~ "Skin",
+    Tissue_type_1 == "urinary+bladder" ~ "Urinary bladder")) %>%
+  ggplot() + aes(x = Age, y = Intensity) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  stat_cor(label.x.npc = 0.0025, label.y.npc = 0.85, method = "spearman") + 
+  scale_colour_npg() + scale_fill_npg() + facet_wrap(~Tissue_type_1)
+
+cup5 <- 
+  finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 %in% c("liver", "skin", "urinary+bladder")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "liver" ~ "Liver",
+    Tissue_type_1 == "skin" ~ "Skin",
+    Tissue_type_1 == "urinary+bladder" ~ "Urinary bladder")) %>%
+  ggplot() + aes(x = Age, y = Intensity, colour = Antibody_name) + geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_colour_npg() + scale_fill_npg() + facet_wrap(~Tissue_type_1)
+
+cup6 <- 
+  finalRes %>%
+  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 %in% c("liver", "skin", "urinary+bladder")) %>%
+  mutate(Tissue_type_1 = case_when(
+    Tissue_type_1 == "liver" ~ "Liver",
+    Tissue_type_1 == "skin" ~ "Skin",
+    Tissue_type_1 == "urinary+bladder" ~ "Urinary bladder")) %>%
+  ggplot() + aes(x = Age2, y = Intensity) + geom_boxplot() + scale_x_discrete(limits = level_order) + xlab("Age") + facet_wrap(~Tissue_type_1) +
+  stat_compare_means(comparisons = my_comparisons, label.y = c(123, 135, 147)) + scale_y_continuous(limits = c(60, 155))
+  
+ggarrange(
+  cup4, cup5, cup6, nrow = 3,
+  common.legend = FALSE, legend = "top"
+  )
+
+ggsave(here("output/MMP9/ggarranged.tiff"))
+```
+
+The above chunk of code generates the plot below, showcasing i) linear regression plots with strong correlation values of high significance across all three tissue types, ii) the linear regression plots coloured by antibody names demonstrating a common pattern in intensity levels regardless of different antibodies, and iii) box plots with pairwise comparisons between the three age groups, labelled by p values. 
+![mmp9](https://github.com/user-attachments/assets/57948d55-2a06-4f37-94fb-b2fe437b0b80)
 
 
 
