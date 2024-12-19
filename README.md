@@ -156,7 +156,7 @@ kruskalResults %>%
 This testing identified that 34/44 tissue types have a statistically significant difference in intensity levels, representative of protein expression, between the age groups. Knowing this, we can move on to the next part of the workflow i.e. the next question!
 
 ## 2. Which age groups significantly statistically differ across tissue types?
-To answer this question, we will perform a post-hoc analysis of the Kruskall-Wallis test results, for which Dunn's test is used, using a similar approach as above. 
+To answer this question, we will perform a post-hoc analysis of the Kruskal-Wallis test results, for which Dunn's test is used, using a similar approach as above. 
 
 Note how we are using *a* data frame, generated in the previous code chunk, to perform Dunn's test only on the data stored in that data frame, before storing it into a new results data frame, *b*. We will keep using that same approach throughout this workflow. 
 
@@ -204,7 +204,7 @@ adipose+tissue | BGN | CAB003678 | M | 26 | < 40 | 1995 | 62.74 | 25.57 | < 40 |
 Now that we know which tissues have significant differences in protein expression and between which age groups these differences occur, we want to know which genes and proteins contribute to it.
 
 ## 3. Among the tissue types with significant differences, which genes do significantly statistically differ in intensity?
-Here, we will use the same Kruskall-Wallis function we defined in the first step, but this time we will apply it to the Gene column instead of the Tissue column, and include the filtering step based on our set significance threshold. 
+Here, we will use the same Kruskal-Wallis function we defined in the first step, but this time we will apply it to the Gene column instead of the Tissue column, and include the filtering step based on our set significance threshold. 
 
 ```
 c <- b %>%
@@ -236,7 +236,7 @@ kruskalGenes
 Running this chunk of code identified 73 genes (out of 734) which significantly differ in intensity across two or more age groups, in the 34 tissues identified above, which brings us to the last part of our workflow. 
 
 ## 4. Which age groups significantly statistically differ in each of those genes?
-Once again, as we used the Kruskall-Wallis test in the previous step, we need to use Dunn's test in the post-hoc analysis to identify the specific genes which significantly differ.
+Once again, as we used the Kruskal-Wallis test in the previous step, we need to use Dunn's test in the post-hoc analysis to identify the specific genes which significantly differ.
 
 ```
 d <- c %>%
