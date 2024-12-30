@@ -1,10 +1,10 @@
 # High-throughput image analysis of quantitative immunohistochemistry data reveals age-dependent changes in mitochondrial and extracellular matrix proteins in multiple human tissues
 
-The process of ageing induces physiological changes at cellular and molecular levels, often leading to complex chronic diseases. Whilst a large body of literature describes age-induced changes at a tissue level, not as much is known about the impact of ageing on the tissue microenvironment, defined by its extracellular matrix. In this project, I investigated the changes in matrisome and mitochondrial proteome expression with age across 44 human tissue types. 
+The process of ageing induces physiological changes at cellular and molecular levels, often leading to complex chronic diseases. Whilst a large body of literature describes age-induced changes at a tissue level, not as much is known about the impact of ageing on the tissue microenvironment, defined by its extracellular matrix. In this project, I investigated the changes in matrisome and mitochondrial proteome expression with age across 44 human tissue types aiming to develop a workflow to identify existing and novel ageing biomarkers. 
 
 This project was the basis of my Bachelor's thesis. The host lab used data mining to obtain i) 153,919 pathologist-annotated immunohistochemistry images and ii) corresponding patient metadata from the Human Protein Atlas (HPA) database. To my knowledge, the patient metadata from the HPA database, including age and sex, has never been explored in the context of ageing, making this project the first exploration of the HPA data in an ageing study. 
 
-The purpose of the project was to identify a subset of mitochondrial and extracellular matrix proteins whose expression levels significantly change during ageing and curate a list of proteins that are differentially expressed across multiple age groups, in single or multiple tissue types. The objectives to achieve this include i) the development of a differential expression workflow which will perform thorough statistical testing for significance between staining intensity levels, representative of protein expression, across age groups, and ii) the implementation of the developed workflow on the quantitative data from mitochondrial proteome and the matrisome to identify the proteins of interest.
+The purpose of the project was to identify a subset of mitochondrial and extracellular matrix proteins whose expression levels significantly change during ageing and curate a list of proteins that are differentially expressed across multiple age groups, in single or multiple tissue types. The objectives to achieve this include i) the development of a differential expression workflow which will perform thorough statistical testing for significance between staining intensity levels, representative of protein expression, across age groups, and ii) the implementation of the developed workflow on the quantitative data from mitochondrial proteome and the matrisome to identify existing and potentially novel age-associated proteins.
 
 **Data structure**<br/>
 The images were batch-processed using a custom MATLAB script, generating a dataset of the following structure:
@@ -104,8 +104,8 @@ ggarrange(
 ggsave(here("output/density-and-qq2.tiff"), height = 4, width = 9)
 ```
 
-This produced the following figure:
-![density-and-qq](https://github.com/user-attachments/assets/b8ab2651-ded0-4035-b8d0-6feda1c2ddf4)
+This produced the following figure:<br/>
+<img src="https://github.com/user-attachments/assets/b8ab2651-ded0-4035-b8d0-6feda1c2ddf4" width="800" />
 
 Based on the output above, we can deduce that the data is not normally distributed. It is positively skewed, as visible in the density plot, complemented by the upward curve shape in the QQ plot, representative of positively skewed data. 
 
@@ -339,8 +339,8 @@ metabolicRes %>%
 ggsave(here("output/metabolicLinReg.png"), height = 4, width = 9)
 ```
 
-The output shows that after filtering the outliers out, the generated model is a poor fit for the intensity and age parameters in ADAMTS13 samples as only 9.9% of the variability in intensity could be explained by age, and that is insignificant (p = 0.2). In the case of ALDH6A1, the model predicts that 53% of the variability in intensity levels is explained by age with high significance (p < 0.0001). Lastly, the model is a strong fit for MMP9 intensity level and age parameters, predicting 83% of the variability in intensity to be explained by age, with high significance (p < 0.0001).  
-![metabolicLinReg](https://github.com/user-attachments/assets/d2c2ebea-4073-4c5a-9bdc-89aa31af608c)
+The output shows that after filtering the outliers out, the generated model is a poor fit for the intensity and age parameters in ADAMTS13 samples as only 9.9% of the variability in intensity could be explained by age, and that is insignificant (p = 0.2). In the case of ALDH6A1, the model predicts that 53% of the variability in intensity levels is explained by age with high significance (p < 0.0001). Lastly, the model is a strong fit for MMP9 intensity level and age parameters, predicting 83% of the variability in intensity to be explained by age, with high significance (p < 0.0001).<br/>
+<img src="https://github.com/user-attachments/assets/d2c2ebea-4073-4c5a-9bdc-89aa31af608c" width="850" />
 
 Now that we know which antibodies to keep (and after doing this for every tissue type), we will store all of our tissue-specific results in a general results data frame. 
 ```
@@ -387,16 +387,12 @@ write.xlsx(corrExport, file = "correlations.xlsx")
 
 We will also use that data frame to visualise the data for all tissue types in which a gene of interest had differential intensity. Moreover, we are also going to perform a pairwise comparison of the intensity means between the three groups, to include the significance labels in the final figure. 
 
-Let's say our gene of interest is MMP9, and we found it has a differential intensity in the liver, spleen, skin and bladder. 
+Let's say our gene of interest is MMP9, and we found it has a differential intensity in the liver, skin and bladder. 
 ```
 finalRes %>%
   dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "liver", Antibody_name %!in% c("CAB000348", "HPA001238")) %>%
   compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
 my_comparisons2 <- list(c("40-60", "≥ 60"))
-
-finalRes %>%
-  dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "spleen") %>%
-  compare_means(Intensity ~ Age2, data = ., method = "wilcox.test")
 
 finalRes %>%
   dplyr::filter(Gene_name == "MMP9", Tissue_type_1 == "skin", Antibody_name %!in% c("CAB000348", "CAB068200")) %>%
@@ -450,7 +446,7 @@ ggsave(here("output/MMP9/ggarranged.tiff"))
 The above chunk of code generates the plot below, showcasing 
 1) linear regression plots with strong correlation values of high significance across all three tissue types,
 2) the linear regression plots coloured by antibody names, demonstrating a common pattern in intensity levels regardless of different antibodies,
-3) box plots with pairwise comparisons between the three age groups, labelled by *p* values. 
-![mmp9](https://github.com/user-attachments/assets/57948d55-2a06-4f37-94fb-b2fe437b0b80)
+3) box plots with pairwise comparisons between the three age groups, labelled by *p* values.<br/>
+<img src="https://github.com/user-attachments/assets/57948d55-2a06-4f37-94fb-b2fe437b0b80" width="700" />
 
-The results from this analysis support the notion that MMP9 may represent an ageing biomarker in different tissues, alongside two novel, potentially age-related proteins, identified in this study (undisclosed in this repository). 
+The results from this analysis support the notion that MMP9 may represent an ageing biomarker in multiple tissues, alongside two novel age-associated proteins identified in this project (undisclosed in this repository). 
