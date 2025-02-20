@@ -97,7 +97,7 @@ qqp <- ECM %>%
   ylab("Sample quantiles") + xlab("Theoretical quantiles")
 
 ggarrange(
-  dp1, qqp1,
+  dp, qqp,
   common.legend = FALSE, legend = "top"
   )
 
