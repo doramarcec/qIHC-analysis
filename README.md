@@ -70,15 +70,15 @@ ECM$Age2 <- as.numeric(as.character(ECM$Age))
 ECM <- ECM %>%
   mutate(Age2 = case_when(
     Age2 < 40 ~ "< 40", 
-    Age2 >= 40 & Age2 < 60 ~ "40-60", 
-    Age2 >= 60 ~ "≥ 60" 
+    Age2 >= 40 & Age2 =< 60 ~ "40-60", 
+    Age2 > 60 ~ "> 60" 
   )) %>%
   drop_na()
 
 ECM %>%
   count(Age2)
 
-level_order <- c('< 40', '40-60', '≥ 60')
+level_order <- c('< 40', '40-60', '> 60')
 ```
 The remainder of the analysis will centre around inferential statistics, aiming to identify whether the protein expression across the three age categories statistically differs. 
 
